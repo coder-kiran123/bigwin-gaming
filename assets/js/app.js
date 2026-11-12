@@ -20,14 +20,16 @@
     remove(key) { try { localStorage.removeItem(key); } catch (e) {} },
   };
 
-  /* ---------- Data layer: swap these for API calls ---------- */
+  /* ---------- Data layer ----------
+     Signed-in player + Game IDs come from the server (api.js → server/app.py).
+     Chats and Payments still use sample data from config.js (next step: connect
+     /api/support/messages and /api/deposits, /api/withdrawals). */
   const api = {
-    user: () => store.get("bw-user", S.demoUser),
+    user: () => BW.session.get(),
     chats: () => S.chats,
     groups: () => S.groups,
     payments: () => store.get("bw-payments", S.payments),
     savePayment(p) { const list = [p, ...api.payments()]; store.set("bw-payments", list); return list; },
-    gameIds: () => S.gameIds,
   };
 
   /* ---------- Toast ---------- */
@@ -44,7 +46,7 @@
   /* ---------- Header: welcome name + profile image ---------- */
   function initHeader() {
     const user = api.user();
-    const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
+    const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username;
     const welcome = $("#welcome-name");
     if (welcome) welcome.textContent = `Welcome, ${name}`;
 
@@ -79,8 +81,7 @@
 
     $$("[data-logout]").forEach((b) =>
       b.addEventListener("click", () => {
-        store.remove("bw-user");
-        store.remove("bw-photo");
+        BW.session.clear();
         location.href = "../auth.html";
       })
     );
@@ -224,39 +225,112 @@
     });
   }
 
-  /* ---------- Game ID page ---------- */
-  function initGameIds() {
+  /* ---------- Game ID page (live: server creates the account on the game's agent portal) ---------- */
+  const gameInfo = (key) => S.games.find((g) => g.key === key) || { key, name: key, image: "" };
+
+  function credCard(acc, password) {
+    const g = gameInfo(acc.game);
+    const icon = g.image
+      ? `<div class="avatar avatar--sm" style="background:url('../${esc(g.image)}') center/cover"></div>`
+      : `<div class="avatar avatar--gold avatar--sm">${esc(g.name.slice(0, 2).toUpperCase())}</div>`;
+    const pw = password
+      ? `<code>${esc(password)}</code><button class="copy-btn" data-copy="${esc(password)}">Copy</button>`
+      : `<code>••••••••</code><button class="copy-btn" data-show="${esc(acc.game)}">Show</button>`;
+    return `<div class="cred" data-game="${esc(acc.game)}">
+      <div class="cred__head">${icon}<strong>${esc(g.name)}</strong></div>
+      <div class="cred__row"><span>Username</span><code>${esc(acc.game_username)}</code><button class="copy-btn" data-copy="${esc(acc.game_username)}">Copy</button></div>
+      <div class="cred__row" data-pw>${`<span>Password</span>`}${pw}</div>
+    </div>`;
+  }
+
+  async function initGameIds() {
     const wrap = $("#cred-list");
-    const ids = api.gameIds();
-    wrap.innerHTML = ids.length
-      ? ids.map((c) => `<div class="cred">
-          <div class="cred__head"><div class="avatar avatar--gold avatar--sm">${esc(c.game.slice(0, 2).toUpperCase())}</div><strong>${esc(c.game)}</strong></div>
-          <div class="cred__row"><span>Username</span><code>${esc(c.username)}</code><button class="copy-btn" data-copy="${esc(c.username)}">Copy</button></div>
-          <div class="cred__row"><span>Password</span><code>${esc(c.password)}</code><button class="copy-btn" data-reveal>Request</button></div>
-        </div>`).join("")
-      : '<p class="empty">No Game IDs yet. Request one below.</p>';
+    const sel = $("#gid-game");
+    const form = $("#gid-form");
+    const submit = $("button[type=submit]", form);
+    let accounts = [];
+    let active = [];
+
+    const renderSelect = () => {
+      const owned = new Set(accounts.map((a) => a.game));
+      // Show games in the same order as the home page; only games the admin has connected
+      const avail = S.games.filter((g) => active.includes(g.key) && !owned.has(g.key));
+      sel.innerHTML = avail.length
+        ? '<option value="">Select a game</option>' + avail.map((g) => `<option value="${esc(g.key)}">${esc(g.name)}</option>`).join("")
+        : `<option value="">${active.length ? "You have every available game" : "No games available yet"}</option>`;
+      sel.disabled = submit.disabled = !avail.length;
+    };
+    const renderList = (fresh = {}) => {
+      wrap.innerHTML = accounts.length
+        ? accounts.map((a) => credCard(a, fresh[a.game])).join("")
+        : '<p class="empty">No Game IDs yet. Pick a game below to get one instantly.</p>';
+    };
+
+    wrap.innerHTML = '<p class="empty">Loading your Game IDs…</p>';
+    try {
+      const [st, acc] = await Promise.all([BW.gamesStatus(), BW.gameAccounts()]);
+      active = st.data.active || [];
+      accounts = acc.data || [];
+    } catch (err) {
+      wrap.innerHTML = `<p class="empty">${esc(err.message)}</p>`;
+      sel.innerHTML = '<option value="">Unavailable</option>';
+      sel.disabled = submit.disabled = true;
+      return;
+    }
+    renderList();
+    renderSelect();
 
     wrap.addEventListener("click", async (e) => {
       const copy = e.target.closest("[data-copy]");
       if (copy) {
         try { await navigator.clipboard.writeText(copy.dataset.copy); toast("Copied to clipboard."); }
         catch (err) { toast("Couldn't copy — please copy it manually."); }
+        return;
       }
-      if (e.target.closest("[data-reveal]")) toast("For security, support will send your password in Chats.");
+      const show = e.target.closest("[data-show]");
+      if (show) {
+        show.disabled = true;
+        try {
+          const res = await BW.gameLogin(show.dataset.show);
+          const row = show.closest("[data-pw]");
+          row.innerHTML = `<span>Password</span><code>${esc(res.data.password)}</code><button class="copy-btn" data-copy="${esc(res.data.password)}">Copy</button>`;
+        } catch (err) {
+          toast(err.message);
+          show.disabled = false;
+        }
+      }
     });
 
-    const sel = $("#gid-game");
-    sel.innerHTML = '<option value="">Select a game</option>' + S.games.map((g) => `<option>${esc(g.name)}</option>`).join("");
-    $("#gid-form").addEventListener("submit", (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (!sel.value) return toast("Please choose a game.");
-      // TODO: POST to /api/game-ids
-      toast(`Game ID requested for ${sel.value}. We'll message you in Chats.`);
-      e.target.reset();
+      const key = sel.value;
+      if (!key) return toast("Please choose a game.");
+      const name = gameInfo(key).name;
+      const label = submit.textContent;
+      submit.disabled = sel.disabled = true;
+      submit.textContent = `Creating your ${name} account…`;
+      try {
+        const res = await BW.createGameAccount(key);
+        accounts.unshift({ game: key, game_username: res.data.username });
+        renderList({ [key]: res.data.password });
+        toast(`Your ${name} Game ID is ready!`);
+        wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        submit.textContent = label;
+        renderSelect();
+      }
     });
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    // Members only: send signed-out visitors to the login screen
+    const user = api.user();
+    if (!user || !user.token) {
+      location.replace("../auth.html?tab=login");
+      return;
+    }
     initHeader();
     const page = document.body.dataset.page;
     if (page === "chats") initChats();

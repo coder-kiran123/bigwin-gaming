@@ -68,28 +68,56 @@
   const data = (form) => Object.fromEntries(new FormData(form).entries());
   const notice = (id, text) => { const a = $(id); a.textContent = text; a.hidden = false; };
 
-  function startSession(user) {
-    try { localStorage.setItem("bw-user", JSON.stringify(user)); } catch (e) {}
+  function startSession(player) {
+    BW.session.set(player);
     location.href = APP_URL;
   }
 
-  /* ---------- Submit handlers (replace with real API calls) ---------- */
-  async function submitLogin(values) {
-    // TODO: const res = await fetch("/api/login", { method: "POST", body: JSON.stringify(values) });
-    startSession({ firstName: values.email.split("@")[0], lastName: "" });
+  // Disable a submit button and show progress while a request runs
+  async function busy(btn, text, fn) {
+    const label = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = text;
+    try { return await fn(); } finally { btn.disabled = false; btn.innerHTML = label; }
   }
-  async function submitSignup(values) {
-    // TODO: const res = await fetch("/api/signup", { method: "POST", body: JSON.stringify(values) });
-    startSession({ firstName: values.firstName, lastName: values.lastName });
+
+  /* ---------- Submit handlers (server: server/app.py) ---------- */
+  async function submitLogin(form) {
+    const v = data(form);
+    $("#login-alert").hidden = true;
+    try {
+      const res = await busy($("button[type=submit]", form), "Signing in…", () => BW.login(v.email.trim().toLowerCase(), v.password));
+      startSession(res.data);
+    } catch (err) {
+      notice("#login-alert", err.message);
+    }
+  }
+  async function submitSignup(form) {
+    const v = data(form);
+    $("#signup-alert").hidden = true;
+    try {
+      const res = await busy($("button[type=submit]", form), "Creating account…", () =>
+        BW.register({
+          email: v.email.trim().toLowerCase(),
+          password: v.password,
+          first_name: v.firstName.trim(),
+          last_name: v.lastName.trim(),
+          referred_by: v.referredBy.trim(),
+        })
+      );
+      startSession(res.data);
+    } catch (err) {
+      notice("#signup-alert", err.message);
+    }
   }
 
   $("#login-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    if (validateForm(e.target)) submitLogin(data(e.target));
+    if (validateForm(e.target)) submitLogin(e.target);
   });
   $("#signup-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    if (validateForm(e.target)) submitSignup(data(e.target));
+    if (validateForm(e.target)) submitSignup(e.target);
   });
 
   /* ---------- Google sign-in / sign-up (Firebase, see firebase.js) ---------- */
@@ -114,10 +142,21 @@
     btn.textContent = "Connecting to Google…";
     try {
       const user = await window.bwGoogleSignIn();
-      // TODO: save { uid, email, referredBy } to your database (e.g. Firestore) for new members.
+      // The server verifies the Google token, then signs in (or creates) the BigWin account
+      const res = await BW.google(user.idToken, referredBy);
       try { if (user.photo) localStorage.setItem("bw-photo", JSON.stringify(user.photo)); } catch (e) {}
-      startSession({ uid: user.uid, firstName: user.firstName, lastName: user.lastName, email: user.email, referredBy, provider: "google" });
+      startSession(res.data);
     } catch (err) {
+      if (err.code === "need_referral") {
+        show("signup");
+        notice("#signup-alert", err.message);
+        $("#referred-by").focus();
+        return;
+      }
+      if (!err.code || !String(err.code).startsWith("auth/")) {
+        notice(alertId, err.message);
+        return;
+      }
       const quiet = ["auth/popup-closed-by-user", "auth/cancelled-popup-request"];
       if (!quiet.includes(err.code)) {
         const msgs = {
@@ -148,6 +187,7 @@
   /* ---------- Initial view from ?tab= ---------- */
   const params = new URLSearchParams(location.search);
   show(params.get("tab") || "welcome", false);
+  if (params.get("expired")) notice("#login-alert", "Your session ended. Please sign in again.");
   const game = params.get("game");
   if (game) notice("#signup-alert", `Create your free account to get your ${game} Game ID.`);
 })();

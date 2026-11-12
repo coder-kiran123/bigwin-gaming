@@ -24,6 +24,7 @@ if (configured) {
     const { user } = await signInWithPopup(auth, provider);
     const [firstName = "", ...rest] = (user.displayName || "").split(" ");
     return {
+      idToken: await user.getIdToken(),   // sent to the server, which verifies it with Google
       uid: user.uid,
       email: user.email,
       firstName: firstName || (user.email || "").split("@")[0],

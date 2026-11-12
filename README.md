@@ -1,104 +1,144 @@
-# BigWin Gaming — Website
+# BigWin Gaming
 
-A responsive website for **BigWin Gaming** with a black-and-gold theme. It has a public home page, login and sign-up pages, and a members-only app (Chats, Payments, Game ID).
+The full BigWin Gaming platform:
+- a black-and-gold **website** (home page, login/sign-up, members app)
+- a Python **server** that creates players' **Game IDs** automatically on each game's agent portal
+- an **admin panel** at `/admin`
 
-It is plain HTML, CSS and JavaScript. There is no build step and nothing to install, so it can be hosted anywhere.
+The server and admin panel come from the Gameroom platform, rebranded for BigWin.
 
 ---
 
 ## Folder structure
 
 ```
-gaming-website/
+bigwin-gaming/
 ├── index.html            Home: live ticker, hero, stats, featured games, CTA
 ├── auth.html             Welcome / Login / Create account  (?tab=login | ?tab=signup)
-├── guide.html            How to Play
-├── support.html          Support: FAQ + contact form
-├── privacy.html          Privacy Policy (template)
-├── terms.html            Terms & Conditions (template)
-├── 404.html              Page-not-found
+├── guide.html, support.html, privacy.html, terms.html, 404.html
 │
-├── app/                  Members area (after login)
-│   ├── chats.html        Channels, pinned support chat, groups, conversation view
-│   ├── payments.html     Load / Cashout requests + history
-│   └── game-id.html      Game logins, request new Game ID, log out
+├── app/                  Members area (sign-in required)
+│   ├── chats.html        Support chat & groups          (sample data for now)
+│   ├── payments.html     Load / Cashout                 (sample data for now)
+│   └── game-id.html      ★ LIVE: player's Game IDs, get a new Game ID
 │
-└── assets/
-    ├── css/
-    │   ├── style.css     Shared: theme colours, buttons, forms, header, footer
-    │   ├── home.css      Home page only
-    │   ├── auth.css      Login / sign-up only
-    │   ├── app.css       Member app only
-    │   └── pages.css     Support, guide, legal, 404
-    ├── js/
-    │   ├── config.js     ★ ALL editable content: name, games, stats, ticker, sample data
-    │   ├── icons.js      SVG icon set
-    │   ├── main.js       Shared: mobile menu, live-chat bubble, footer year
-    │   ├── home.js       Home page: ticker, stats, games grid, game pop-up
-    │   ├── auth.js       Login / sign-up views + validation
-    │   └── app.js        Member app: chats, payments, game IDs, profile image
-    └── images/
-        ├── logo.svg
-        ├── favicon.svg
-        └── games/        Put game cover images here
+├── admin/                Admin panel, served at /admin
+│   ├── index.html
+│   ├── admin.js
+│   └── admin.css
+│
+├── server/               Python (Flask) backend
+│   ├── app.py            All API routes (/api/…) and serves the website
+│   ├── database.py       SQLite locally, PostgreSQL in production
+│   ├── game_apis/        One module per game agent portal (Juwa, Fire Kirin, Orion Stars…)
+│   ├── mailer.py         Email codes (password reset, verification)
+│   └── telegram_notify.py
+│
+├── assets/
+│   ├── css/              style.css (theme) + one file per page type
+│   ├── js/
+│   │   ├── config.js     ★ Editable content: games, stats, ticker, sample data
+│   │   ├── api.js        Talks to the server (sessions, sign-in, Game IDs)
+│   │   ├── auth.js       Login / sign-up
+│   │   ├── app.js        Members app
+│   │   ├── firebase.js + firebase-config.js   Google sign-in
+│   │   └── main.js, home.js, icons.js
+│   └── images/           logo, favicon, games/ (game covers)
+│
+├── requirements.txt      Python packages
+├── Procfile              Start command for Railway / Render / Heroku
+└── .env.example          Settings template (copy to .env)
 ```
+
+---
+
+## Run locally
+
+```bash
+cd bigwin-gaming
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env            # then edit .env and set ADMIN_PASSWORD
+.venv/bin/python server/app.py
+```
+
+Open **http://localhost:8000** for the website and **http://localhost:8000/admin** for the admin panel.
+
+The members app needs this server. Opening the HTML files directly, or with `python3 -m http.server`, shows the pages, but sign-in and Game IDs will not work.
+
+---
+
+## How Game IDs work
+
+1. **Admin → Backend Attachments**: choose a game (for example Fire Kirin) and enter **your agent account** username and password for that game's agent portal. Click **Test** to confirm it connects.
+2. That game then appears for players under **Game ID → Get a new Game ID**.
+3. When a player clicks **Get Game ID**, the server logs into that game's agent portal, **creates the player's account**, saves it, and shows the player their username and password.
+4. The player can come back any time and tap **Show** to see their password again.
+5. In the admin panel you can see every player's game accounts, check balances, and load or redeem credits.
+
+Supported games (see `server/game_apis/__init__.py`): Juwa, Juwa 2.0, Game Vault, Vegas Sweeps, Ultra Panda, VBlink, Milky Way, Orion Stars, Fire Kirin, Panda Master, Gameroom, Cash Frenzy, Cash Machine, Mafia, Mr. All In One, Yolo, Riversweeps.
+**Noble** is shown on the home page but has no server integration yet, so players can't get a Noble Game ID.
+
+---
+
+## Settings (`.env` locally, environment variables on the host)
+
+| Name | Required | What it is |
+|---|---|---|
+| `ADMIN_PASSWORD` | **Yes** | Admin panel password. Admin login stays **disabled** until it's set. |
+| `SECRET_KEY` | Recommended | Long random string used to sign logins: `python3 -c "import secrets;print(secrets.token_hex(32))"` |
+| `DATABASE_URL` | Production | PostgreSQL URL. If empty, the server uses `server/casino.db` (SQLite, local only). |
+| `SITE_URL` | Yes | Your live address, used in emails (for example `https://bigwingaming.com`) |
+| `FIREBASE_PROJECT_ID` | For Google sign-in | Same as `projectId` in `assets/js/firebase-config.js` |
+| `ALLOWED_ORIGIN` | Optional | Restrict which site can call the API (default `*`) |
+
+Email, SMS, Telegram and payment-gateway keys are entered in the admin panel, not in `.env`.
+
+---
+
+## Deploy (Railway recommended)
+
+1. Go to https://railway.app → **New Project → Deploy from GitHub repo →** `bigwin-gaming`.
+2. Add a **PostgreSQL** database to the project. Railway sets `DATABASE_URL` for you.
+3. Under **Variables**, add `ADMIN_PASSWORD`, `SECRET_KEY`, `SITE_URL` and `FIREBASE_PROJECT_ID`.
+4. Railway reads the `Procfile` and starts the server. Under **Settings → Networking**, add your domain.
+5. In Firebase → Authentication → Settings → **Authorized domains**, add the same domain.
+
+Some game portals only accept requests from approved IP addresses. If **Test** fails on the live server, open the admin panel's server IP page (`/api/server-ip`) and give that IP to the game provider.
+
+---
+
+## Google sign-in (Firebase)
+
+1. https://console.firebase.google.com → **Add project**.
+2. **Authentication → Sign-in method → Google → Enable**.
+3. **Project settings → Your apps → Web (`</>`)**: copy the config into `assets/js/firebase-config.js`.
+4. Set `FIREBASE_PROJECT_ID` on the server.
+5. Add your domain under **Authentication → Settings → Authorized domains** (`localhost` is already allowed).
+
+The server verifies every Google sign-in with Google's public keys before creating or opening an account. New players must enter **Referred by**.
+
+---
 
 ## Common edits
 
 | What to change | Where |
 |---|---|
-| Games list, stats, ticker, payment methods, support agent name | `assets/js/config.js` |
-| Colours (gold, background, etc.) | `:root` at the top of `assets/css/style.css` |
-| Game cover images | Add files to `assets/images/games/`, then set `image: "assets/images/games/juwa.webp"` in `config.js` (square, about 400×400 px) |
-| Logo | Replace `assets/images/logo.svg` and `favicon.svg` |
+| Games, stats, ticker, payment methods | `assets/js/config.js` (a game's `key` must match `server/game_apis/__init__.py`) |
+| Website colours | `:root` in `assets/css/style.css` |
+| Game cover images | `assets/images/games/` + `image:` in `config.js` |
+| Logo | `assets/images/logo.svg`, `logo.png` (emails), `favicon.svg` |
 | Legal text | `privacy.html`, `terms.html` (**have a lawyer review these before launch**) |
 
-## Run locally
+## Still to connect
 
-Open `index.html` in a browser. For the most accurate result, serve the folder:
+- **Chats** (`app/chats.html`) → the server already has `/api/support/messages`.
+- **Payments** (`app/payments.html`) → the server already has `/api/deposits` and `/api/withdrawals`.
+- **Phone sign-in** → the server already has `/api/verify/phone/*` (needs an SMS provider set in admin).
 
-```bash
-cd gaming-website
-python3 -m http.server 8080
-# then open http://localhost:8080
-```
+## Before going live
 
-## Deploy
-
-Upload the whole folder to any static host, such as Netlify, Vercel, GitHub Pages, Cloudflare Pages or cPanel `public_html`. `404.html` is picked up automatically by most hosts.
-
----
-
-## Google sign-up (Firebase)
-
-The Google buttons on `auth.html` already contain working code (`assets/js/firebase.js`). To turn them on:
-
-1. Go to https://console.firebase.google.com → **Add project** (Google Analytics is optional).
-2. **Build → Authentication → Get started → Sign-in method → Google → Enable**, choose a support email, then **Save**.
-3. **Project settings (⚙) → General → Your apps → Web (`</>`)**: register an app (no hosting needed) and copy the `firebaseConfig` values.
-4. Paste them into `assets/js/firebase-config.js` (`apiKey`, `authDomain`, `projectId`, `appId`).
-5. **Authentication → Settings → Authorized domains**: add your live domain (for example `bigwingaming.com`). `localhost` is already allowed.
-6. Test with a local server (`python3 -m http.server 8080`). It does **not** work when you open the file directly (`file://`).
-
-Sign-up flow: the member types who referred them and clicks **Sign up with Google**. After choosing their Google account, they land in `app/chats.html` with their Google name and photo.
-To keep the referral name on the server, save it to a database such as Firestore (see the `TODO` in `googleAuth()` in `auth.js`).
-
-## ⚠️ Before going live: connect a backend
-
-The front end is complete. Accounts, chat and payments currently run in **demo mode**: data is stored only in the visitor's browser (`localStorage`) or comes from the sample data in `config.js`. To make it live, connect a backend (for example Firebase, Supabase or your own API). Every place that needs it is marked `// TODO` in the code:
-
-| Feature | File · function |
-|---|---|
-| Login / sign-up | `assets/js/auth.js` · `submitLogin`, `submitSignup` |
-| Google / phone sign-in | `assets/js/auth.js` · `[data-oauth]` handler |
-| Chat messages (real-time) | `assets/js/app.js` · `initChats` → `convo-form` submit |
-| Load / cashout requests | `assets/js/app.js` · `initPayments` → `pay-form` submit |
-| Game ID requests | `assets/js/app.js` · `initGameIds` → `gid-form` submit |
-| Profile image upload | `assets/js/app.js` · `initHeader` → `upload-input` |
-| Support form | `support.html` · inline script |
-| Protect `app/` pages | Add a session check that redirects logged-out users to `auth.html` |
-
-Also before launch:
-- Replace the **live ticker** sample winners in `config.js` with real payouts, or set `ticker.enabled: false`.
-- Make sure the **stats** (members, paid out) are accurate.
-- Confirm that running the service is legal in the regions you serve, and keep the 18+ and responsible-play notices.
+- Set a strong `ADMIN_PASSWORD` and `SECRET_KEY`, and use PostgreSQL.
+- Replace the sample **live ticker** winners in `config.js` with real payouts, or set `ticker.enabled: false`.
+- Make sure the home page **stats** are accurate.
+- Confirm that the service is legal where you operate, and keep the 18+ and responsible-play notices.

@@ -6,6 +6,9 @@
    ========================================================================== */
 
 window.SITE = {
+  // Backend API. "" = same server that serves the website (Flask in server/).
+  apiBase: "",
+
   brand: {
     name: "BigWin Gaming",
     initials: "BW",
@@ -22,28 +25,28 @@ window.SITE = {
     { icon: "bolt", value: "Instant", label: "Cashouts" },
   ],
 
-  // Featured games grid.
+  // Featured games grid. `key` must match the game key on the server (server/game_apis/__init__.py).
   // `image`: put a file in assets/images/games/ and set e.g. "assets/images/games/juwa.webp".
   // Leave it empty and a styled tile with the game's initials is shown instead.
   games: [
-    { name: "Juwa", image: "assets/images/games/juwa.jpg" },
-    { name: "Gameroom", image: "assets/images/games/gameroom.webp" },
-    { name: "Vegas Sweeps", image: "assets/images/games/vegassweeps.jpg" },
-    { name: "Game Vault", image: "assets/images/games/gamevault.jpg" },
-    { name: "Orion Stars", image: "assets/images/games/orionstars.jpg" },
-    { name: "Cash Machine", image: "assets/images/games/cashmachine.webp" },
-    { name: "Yolo", image: "assets/images/games/yolo.webp" },
-    { name: "Milky Way", image: "assets/images/games/milkyway.jpg" },
-    { name: "Fire Kirin", image: "assets/images/games/firekirin.webp" },
-    { name: "Panda Master", image: "assets/images/games/pandamaster.webp" },
-    { name: "Riversweeps", image: "assets/images/games/riversweeps.webp" },
-    { name: "Ultra Panda", image: "assets/images/games/ultrapanda.jpg" },
-    { name: "Cash Frenzy", image: "assets/images/games/cashfrenzy.webp" },
-    { name: "Mafia", image: "assets/images/games/mafia.webp" },
-    { name: "Mr. All In One", image: "assets/images/games/mrallinone.webp" },
-    { name: "Noble", image: "assets/images/games/noble.webp" },
-    { name: "VBlink", image: "assets/images/games/vblink.webp" },
-    { name: "Juwa 2.0", image: "assets/images/games/juwa2.webp" },
+    { key: "juwa", name: "Juwa", image: "assets/images/games/juwa.jpg" },
+    { key: "gameroom", name: "Gameroom", image: "assets/images/games/gameroom.webp" },
+    { key: "vegassweeps", name: "Vegas Sweeps", image: "assets/images/games/vegassweeps.jpg" },
+    { key: "gamevault", name: "Game Vault", image: "assets/images/games/gamevault.jpg" },
+    { key: "orionstars", name: "Orion Stars", image: "assets/images/games/orionstars.jpg" },
+    { key: "cashmachine", name: "Cash Machine", image: "assets/images/games/cashmachine.webp" },
+    { key: "yolo", name: "Yolo", image: "assets/images/games/yolo.webp" },
+    { key: "milkyway", name: "Milky Way", image: "assets/images/games/milkyway.jpg" },
+    { key: "firekirin", name: "Fire Kirin", image: "assets/images/games/firekirin.webp" },
+    { key: "pandamaster", name: "Panda Master", image: "assets/images/games/pandamaster.webp" },
+    { key: "riversweeps", name: "Riversweeps", image: "assets/images/games/riversweeps.webp" },
+    { key: "ultrapanda", name: "Ultra Panda", image: "assets/images/games/ultrapanda.jpg" },
+    { key: "cashfrenzy", name: "Cash Frenzy", image: "assets/images/games/cashfrenzy.webp" },
+    { key: "mafia", name: "Mafia", image: "assets/images/games/mafia.webp" },
+    { key: "mrallinone", name: "Mr. All In One", image: "assets/images/games/mrallinone.webp" },
+    { key: "noble", name: "Noble", image: "assets/images/games/noble.webp" },
+    { key: "vblink", name: "VBlink", image: "assets/images/games/vblink.webp" },
+    { key: "juwa2", name: "Juwa 2.0", image: "assets/images/games/juwa2.webp" },
   ],
 
   // Scrolling "LIVE" bar at the top of the home page.
@@ -112,11 +115,5 @@ window.SITE = {
     { type: "Load", game: "Orion Stars", amount: 25, method: "PayPal", status: "Completed", date: "Mon, 6:02 PM" },
   ],
 
-  gameIds: [
-    { game: "Juwa", username: "jordan_bw01", password: "••••••••" },
-    { game: "Fire Kirin", username: "jreyes_fk", password: "••••••••" },
-  ],
 
-  // Demo signed-in user (replaced by real session after backend is connected)
-  demoUser: { firstName: "Jordan", lastName: "Reyes" },
 };
