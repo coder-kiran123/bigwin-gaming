@@ -1,0 +1,39 @@
+/* ==========================================================================
+   BigWin Gaming — Auth page (auth.html): welcome, login, create account
+   ========================================================================== */
+
+.auth { min-height: 100vh; display: flex; justify-content: center; padding: 32px 16px 48px; }
+.auth__inner { width: 100%; max-width: 380px; }
+
+.view[hidden] { display: none; }
+
+/* Welcome (members-only splash) */
+.welcome { min-height: calc(100vh - 80px); display: flex; flex-direction: column; justify-content: center; text-align: center; }
+.welcome .avatar { margin: 0 auto 28px; }
+.welcome h1 { color: var(--gold); font-size: 2rem; }
+.welcome .text-muted { margin: 8px 0 32px; }
+
+/* Small brand row at top of forms */
+.auth-brand { display: flex; align-items: center; gap: 12px; color: var(--gold); font-weight: 800; font-size: 1.1rem; margin-bottom: 28px; }
+.back-link { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; background: none; border: none; padding: 0; }
+.back-link:hover { color: var(--gold); }
+.back-link svg { width: 18px; height: 18px; stroke: currentColor; }
+
+.auth h2 { font-size: 1.6rem; margin-bottom: 8px; }
+.auth .lead { color: var(--text-muted); font-size: 0.92rem; margin-bottom: 28px; }
+
+.form { display: flex; flex-direction: column; gap: 20px; }
+.form__row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.btn--google img, .btn--google svg { width: 20px; height: 20px; }
+.btn--google .g { width: 22px; height: 22px; border-radius: 50%; background: #fff; display: grid; place-items: center; }
+
+.form-note { text-align: center; font-size: 0.78rem; color: var(--text-muted); }
+.form-switch { text-align: center; font-size: 0.9rem; color: var(--text-muted); }
+.form-switch button { background: none; border: none; color: var(--gold); font-weight: 700; padding: 0; }
+
+.alert { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 0.88rem; border: 1px solid; }
+.alert--info { background: var(--gold-tint); border-color: var(--gold-dark); color: var(--gold-light); }
+.alert[hidden] { display: none; }
+
+@media (max-width: 360px) { .form__row { grid-template-columns: 1fr; } }

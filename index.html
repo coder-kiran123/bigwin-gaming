@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BigWin Gaming – Sweepstakes Games, Instant Loads & Cashouts</title>
+  <meta name="description" content="BigWin Gaming — premium social gaming. Instant load, instant cashout, fast signup and 24/7 support.">
+  <meta name="theme-color" content="#0e0e0e">
+  <meta property="og:title" content="BigWin Gaming">
+  <meta property="og:description" content="Instant load, instant cashout, fast signup and 24/7 support.">
+  <meta property="og:image" content="assets/images/logo.svg">
+  <link rel="icon" href="assets/images/favicon.svg" type="image/svg+xml">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="stylesheet" href="assets/css/home.css">
+</head>
+<body>
+
+  <!-- ===== Live winners ticker ===== -->
+  <div class="ticker" aria-label="Recent winners">
+    <div class="ticker__label"><span class="dot"></span>LIVE</div>
+    <div class="ticker__track"></div>
+  </div>
+
+  <!-- ===== Header ===== -->
+  <header class="site-header">
+    <div class="container">
+      <a href="index.html" class="brand"><img src="assets/images/logo.svg" alt=""><span data-brand>BigWin Gaming</span></a>
+      <button class="menu-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-panel">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="nav-panel" id="nav-panel">
+        <nav class="nav" aria-label="Main">
+          <a href="index.html">Home</a>
+          <a href="#games">Games</a>
+          <a href="guide.html">How to Play</a>
+          <a href="support.html">Support</a>
+        </nav>
+        <div class="header-actions">
+          <a href="auth.html?tab=login" class="btn btn--outline-gold btn--sm">Login</a>
+          <a href="auth.html?tab=signup" class="btn btn--gold btn--sm">Sign Up Free</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===== Hero ===== -->
+    <section class="hero">
+      <div class="hero__suits" aria-hidden="true"><span>♠</span><span>♥</span><span>♦</span><span>♣</span></div>
+      <div class="container">
+        <div class="avatar avatar--gold avatar--lg avatar--ring hero__logo" aria-hidden="true">BW</div>
+        <p class="hero__eyebrow">WELCOME TO</p>
+        <h1 class="hero__title">BIGWIN GAMING</h1>
+        <p class="hero__tagline">— Premium Social Gaming Entertainment —</p>
+
+        <div class="chips">
+          <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Instant Load</span>
+          <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg>Instant Cashout</span>
+          <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Fast Signup</span>
+        </div>
+
+        <div class="trust">
+          <span><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/></svg>Secure Play</span>
+          <span class="sep"></span>
+          <span><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="2" y="14" width="5" height="7" rx="2"/><rect x="17" y="14" width="5" height="7" rx="2"/></svg>24/7 Support</span>
+        </div>
+
+        <a href="auth.html?tab=signup" class="btn btn--gold btn--lg">PLAY NOW</a>
+        <p class="hero__foot">Fast. Easy. Fun.</p>
+      </div>
+    </section>
+
+    <!-- ===== Stats (rendered from config.js) ===== -->
+    <section class="stats" id="stats" aria-label="BigWin Gaming in numbers"></section>
+
+    <!-- ===== Featured games ===== -->
+    <section class="section" id="games">
+      <div class="container">
+        <div class="games-head">
+          <h2 class="section-title">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="6"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/></svg>
+            FEATURED GAMES
+          </h2>
+          <p class="section-sub">Click to sign up &amp; play</p>
+          <p class="games-count"><span id="games-count"></span></p>
+        </div>
+        <div class="games-grid" id="games-grid"></div>
+      </div>
+    </section>
+
+    <!-- ===== Closing CTA ===== -->
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="cta">
+          <h2>Ready to Win Big?</h2>
+          <div class="cta__rule"></div>
+          <p>Join 18,000+ players already winning daily. Sign up free in seconds.</p>
+          <a href="auth.html?tab=signup" class="btn btn--gold btn--lg">CREATE FREE ACCOUNT</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== Footer ===== -->
+  <footer class="site-footer">
+    <div class="container">
+      <a href="index.html" class="brand"><img src="assets/images/logo.svg" alt=""><span data-brand>BigWin Gaming</span></a>
+      <ul class="footer-links">
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms &amp; Conditions</a></li>
+        <li><a href="support.html">Support</a></li>
+        <li><a href="guide.html">How to Play</a></li>
+      </ul>
+      <p class="footer-note">© <span data-year></span> <span data-brand>BigWin Gaming</span>. All Rights Reserved.</p>
+      <p class="footer-note">For entertainment purposes only. Must be 18+ to play. Please play responsibly.</p>
+    </div>
+  </footer>
+
+  <!-- ===== Game sign-up modal ===== -->
+  <div class="modal" id="game-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden>
+    <div class="modal__box">
+      <button class="modal__close" aria-label="Close">✕</button>
+      <h3 class="modal__title" id="modal-title">Game Name</h3>
+      <div class="modal__rule"></div>
+      <p class="modal__sub">Sign up free to start playing</p>
+      <div class="locked"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><b>Game ID</b>Sign up to unlock</div>
+      <div class="locked"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><b>Password</b>Sign up to unlock</div>
+      <ul class="benefits">
+        <li>Free account — no deposit needed</li>
+        <li>Instant load &amp; cashout</li>
+        <li>24/7 live support</li>
+      </ul>
+      <a href="auth.html?tab=signup" class="btn btn--gold btn--block" id="modal-play">PLAY NOW — FREE</a>
+      <a href="auth.html?tab=login" class="modal__alt">Already a member? Login →</a>
+    </div>
+  </div>
+
+  <!-- ===== Live chat widget ===== -->
+  <div class="chat-widget">
+    <div class="chat-card" hidden>
+      <div class="chat-card__head">
+        <div class="avatar avatar--gold avatar--sm">B<span class="status"></span></div>
+        <div><strong data-agent>Brody</strong><small>Online now</small></div>
+        <button class="chat-card__close" aria-label="Close chat">✕</button>
+      </div>
+      <div class="chat-card__msg">
+        <p>Hey! Welcome to <span data-brand>BigWin Gaming</span>! 👋</p>
+        <p>Need help getting started or have a question? I'm here to help!</p>
+        <time>Just now</time>
+      </div>
+      <a href="support.html" class="btn btn--gold btn--block btn--sm"><span>Chat with <span data-agent>Brody</span> →</span></a>
+    </div>
+    <button class="chat-fab" aria-label="Open live chat" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/></svg>
+    </button>
+  </div>
+
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/main.js"></script>
+  <script src="assets/js/home.js"></script>
+</body>
+</html>

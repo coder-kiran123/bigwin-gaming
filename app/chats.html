@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Chats – BigWin Gaming</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0e0e0e">
+  <link rel="icon" href="../assets/images/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body class="app" data-page="chats">
+  <div class="app-shell">
+
+    <!-- ===== Top bar ===== -->
+    <header class="app-top">
+      <div class="avatar avatar--gold" id="profile-avatar">BW<span class="status"></span></div>
+      <div class="app-top__text">
+        <h1 data-brand>BigWin Gaming</h1>
+        <p id="welcome-name">Welcome</p>
+      </div>
+      <button class="upload-btn" type="button" aria-label="Upload profile image">Upload<br>image
+        <span class="plus"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+      </button>
+      <input type="file" id="upload-input" accept="image/*" hidden>
+    </header>
+
+    <main>
+      <!-- Channels -->
+      <section class="channels" id="channels" aria-label="Channels"></section>
+
+      <!-- Pinned support chat -->
+      <section id="pinned" aria-label="Pinned"></section>
+
+      <!-- Groups -->
+      <h2 class="list-label">Groups</h2>
+      <section id="groups" aria-label="Groups"></section>
+    </main>
+  </div>
+
+  <!-- ===== Bottom tab bar ===== -->
+  <nav class="tabbar" aria-label="App">
+    <div class="tabbar__inner">
+      <a class="tab" href="chats.html" aria-current="page">Chats</a>
+      <a class="tab" href="payments.html">Payments</a>
+      <a class="tab" href="game-id.html">Game ID</a>
+    </div>
+  </nav>
+
+  <!-- ===== Conversation (opens over the list) ===== -->
+  <div class="convo" id="convo" hidden>
+    <div class="convo__inner">
+      <div class="convo__head">
+        <button class="icon-btn" id="convo-back" aria-label="Back to chats"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+        <div class="avatar avatar--sm" id="convo-avatar"></div>
+        <div><h2 id="convo-name"></h2><small id="convo-status"></small></div>
+      </div>
+      <div class="convo__msgs" id="convo-msgs" aria-live="polite"></div>
+      <form class="convo__form" id="convo-form">
+        <label for="convo-input" class="visually-hidden">Message</label>
+        <input class="input" id="convo-input" placeholder="Type a message…" autocomplete="off">
+        <button class="icon-btn" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button>
+      </form>
+    </div>
+  </div>
+
+  <script src="../assets/js/config.js"></script>
+  <script src="../assets/js/icons.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/app.js"></script>
+</body>
+</html>

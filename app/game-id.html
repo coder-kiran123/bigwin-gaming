@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Game ID – BigWin Gaming</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0e0e0e">
+  <link rel="icon" href="../assets/images/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body class="app" data-page="game-id">
+  <div class="app-shell">
+
+    <!-- ===== Top bar ===== -->
+    <header class="app-top">
+      <div class="avatar avatar--gold" id="profile-avatar">BW<span class="status"></span></div>
+      <div class="app-top__text">
+        <h1 data-brand>BigWin Gaming</h1>
+        <p id="welcome-name">Welcome</p>
+      </div>
+      <button class="upload-btn" type="button" aria-label="Upload profile image">Upload<br>image
+        <span class="plus"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+      </button>
+      <input type="file" id="upload-input" accept="image/*" hidden>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>My Game IDs</h2>
+        <div id="cred-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Request a new Game ID</h2>
+        <form id="gid-form" class="stack gap-20" novalidate>
+          <div class="field">
+            <label for="gid-game">Game <span class="req">*</span></label>
+            <select class="input" id="gid-game"></select>
+          </div>
+          <button type="submit" class="btn btn--gold btn--block">Request Game ID</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Account</h2>
+        <div class="stack gap-12">
+          <a href="../support.html" class="btn btn--dark btn--block">Help &amp; Support</a>
+          <button type="button" class="btn btn--outline-gold btn--block" data-logout>Log out</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ===== Bottom tab bar ===== -->
+  <nav class="tabbar" aria-label="App">
+    <div class="tabbar__inner">
+      <a class="tab" href="chats.html">Chats</a>
+      <a class="tab" href="payments.html">Payments</a>
+      <a class="tab" href="game-id.html" aria-current="page">Game ID</a>
+    </div>
+  </nav>
+
+  <script src="../assets/js/config.js"></script>
+  <script src="../assets/js/icons.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/app.js"></script>
+</body>
+</html>

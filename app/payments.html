@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Payments – BigWin Gaming</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0e0e0e">
+  <link rel="icon" href="../assets/images/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body class="app" data-page="payments">
+  <div class="app-shell">
+
+    <!-- ===== Top bar ===== -->
+    <header class="app-top">
+      <div class="avatar avatar--gold" id="profile-avatar">BW<span class="status"></span></div>
+      <div class="app-top__text">
+        <h1 data-brand>BigWin Gaming</h1>
+        <p id="welcome-name">Welcome</p>
+      </div>
+      <button class="upload-btn" type="button" aria-label="Upload profile image">Upload<br>image
+        <span class="plus"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+      </button>
+      <input type="file" id="upload-input" accept="image/*" hidden>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>New request</h2>
+        <form id="pay-form" class="stack gap-20" novalidate>
+          <div class="segmented" role="group" aria-label="Request type" style="margin-bottom:0">
+            <button type="button" data-type="Load" aria-pressed="true">Load</button>
+            <button type="button" data-type="Cashout" aria-pressed="false">Cashout</button>
+          </div>
+          <div class="field">
+            <label for="pay-game">Game <span class="req">*</span></label>
+            <select class="input" id="pay-game"></select>
+          </div>
+          <div class="field">
+            <label for="pay-amount">Amount (USD) <span class="req">*</span></label>
+            <input class="input" id="pay-amount" type="number" min="5" step="1" inputmode="decimal" placeholder="$0">
+            <div class="amounts">
+              <button type="button" data-amount="10">$10</button>
+              <button type="button" data-amount="25">$25</button>
+              <button type="button" data-amount="50">$50</button>
+              <button type="button" data-amount="100">$100</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="pay-method" id="pay-method-label">Pay with <span class="req">*</span></label>
+            <select class="input" id="pay-method"></select>
+          </div>
+          <button type="submit" class="btn btn--gold btn--block" id="pay-submit">Request load</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>History</h2>
+        <div id="pay-history"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ===== Bottom tab bar ===== -->
+  <nav class="tabbar" aria-label="App">
+    <div class="tabbar__inner">
+      <a class="tab" href="chats.html">Chats</a>
+      <a class="tab" href="payments.html" aria-current="page">Payments</a>
+      <a class="tab" href="game-id.html">Game ID</a>
+    </div>
+  </nav>
+
+  <script src="../assets/js/config.js"></script>
+  <script src="../assets/js/icons.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/app.js"></script>
+</body>
+</html>

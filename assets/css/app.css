@@ -1,0 +1,134 @@
+/* ==========================================================================
+   BigWin Gaming — Member app (app/chats.html, payments.html, game-id.html)
+   Mobile-first; centred in a phone-width column on larger screens.
+   ========================================================================== */
+
+body.app { background: #060606; }
+.app-shell {
+  max-width: 560px; min-height: 100vh; margin: 0 auto; background: var(--bg);
+  display: flex; flex-direction: column; border-inline: 1px solid var(--border);
+  padding-bottom: 96px; /* room for the tab bar */
+}
+
+/* Top bar ---------------------------------------------------------------- */
+.app-top { display: flex; align-items: center; gap: 16px; padding: 22px 20px; border-bottom: 1px solid var(--border); }
+.app-top__text { flex: 1; min-width: 0; }
+.app-top__text h1 { color: var(--gold); font-size: 1.45rem; }
+.app-top__text p { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-top .avatar { width: 64px; height: 64px; font-size: 1.3rem; background-size: cover; background-position: center; }
+
+.upload-btn {
+  position: relative; flex-shrink: 0; width: 72px; height: 72px; border-radius: 50%; border: none;
+  background: var(--gold); color: var(--on-gold); font-weight: 800; font-size: 0.72rem; line-height: 1.15; padding: 8px;
+}
+.upload-btn .plus {
+  position: absolute; right: -2px; bottom: -2px; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--gold); color: var(--gold); display: grid; place-items: center;
+}
+.upload-btn .plus svg { width: 14px; height: 14px; stroke: currentColor; }
+
+/* Channels (story-style circles) ---------------------------------------- */
+.channels { display: flex; gap: 28px; padding: 22px 20px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.channel { display: flex; flex-direction: column; align-items: center; gap: 10px; background: none; border: none; color: var(--text-muted); font-size: 0.95rem; }
+.channel .avatar { width: 84px; height: 84px; font-size: 1rem; box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--gold); margin: 7px; }
+
+/* Chat list -------------------------------------------------------------- */
+.list-label { padding: 18px 20px 6px; color: var(--text-muted); font-size: 0.95rem; }
+.chat-row {
+  display: flex; align-items: center; gap: 16px; width: 100%; padding: 18px 20px; text-align: left;
+  background: none; border: none; border-bottom: 1px solid var(--border); transition: background 0.15s;
+}
+.chat-row:hover { background: var(--bg-elev); }
+.chat-row--pinned { background: var(--gold-tint); }
+.chat-row--pinned:hover { background: #221d10; }
+.chat-row__body { flex: 1; min-width: 0; }
+.chat-row__name { display: flex; align-items: baseline; gap: 10px; font-weight: 600; font-size: 1.08rem; }
+.chat-row__name .pin { color: var(--gold); font-size: 0.85rem; font-weight: 700; }
+.chat-row__preview { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-row--unread .chat-row__preview { color: var(--text); font-weight: 600; }
+.chat-row__meta { align-self: flex-start; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; color: var(--text-muted); font-size: 0.85rem; }
+.unread { min-width: 26px; height: 26px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--gold); color: var(--on-gold); font-weight: 800; font-size: 0.8rem; display: grid; place-items: center; }
+
+/* Conversation view ------------------------------------------------------ */
+.convo { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; background: #060606; }
+.convo[hidden] { display: none; }
+.convo__inner { width: 100%; max-width: 560px; display: flex; flex-direction: column; background: var(--bg); border-inline: 1px solid var(--border); }
+.convo__head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.convo__head h2 { font-size: 1.05rem; }
+.convo__head small { color: var(--online); }
+.icon-btn { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); flex-shrink: 0; }
+.icon-btn svg { width: 20px; height: 20px; stroke: currentColor; }
+.convo__msgs { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 78%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; }
+.msg--them { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 4px; }
+.msg--me { align-self: flex-end; background: var(--gold); color: var(--on-gold); border-bottom-right-radius: 4px; font-weight: 500; }
+.msg__from { display: block; font-size: 0.75rem; color: var(--gold); font-weight: 700; margin-bottom: 2px; }
+.convo__form { display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+.convo__form .input { border-radius: var(--radius-pill); }
+.convo__form .icon-btn { width: 48px; height: 48px; background: var(--gold); color: var(--on-gold); border: none; }
+
+/* Panels (payments / game id) ------------------------------------------- */
+.panel { padding: 20px; }
+.panel + .panel { border-top: 1px solid var(--border); }
+.panel h2 { font-size: 1.15rem; margin-bottom: 14px; }
+.segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 5px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border-strong); margin-bottom: 18px; }
+.segmented button { min-height: 40px; border-radius: 7px; border: none; background: none; color: var(--text-muted); font-weight: 700; }
+.segmented button[aria-pressed="true"] { background: var(--gold); color: var(--on-gold); }
+select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--gold) 50%), linear-gradient(135deg, var(--gold) 50%, transparent 50%); background-position: calc(100% - 20px) 50%, calc(100% - 15px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+.amounts { display: flex; flex-wrap: wrap; gap: 8px; }
+.amounts button { padding: 8px 14px; border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--border-strong); font-weight: 600; font-size: 0.9rem; }
+.amounts button:hover, .amounts button.active { border-color: var(--gold); color: var(--gold); }
+
+.tx { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.tx:last-child { border-bottom: none; }
+.tx__icon { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); font-weight: 900; }
+.tx__icon--in { color: var(--gold); }
+.tx__icon--out { color: var(--online); }
+.tx__body { flex: 1; min-width: 0; }
+.tx__body strong { display: block; }
+.tx__body small { color: var(--text-muted); }
+.tx__amt { text-align: right; font-weight: 800; }
+.tx__amt small { display: block; font-weight: 600; font-size: 0.75rem; }
+.status--Completed { color: var(--online); }
+.status--Pending { color: var(--gold); }
+.status--Failed { color: var(--danger); }
+
+.cred { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.cred__head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.cred__head strong { flex: 1; font-size: 1.05rem; }
+.cred__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg); margin-top: 8px; font-size: 0.92rem; }
+.cred__row span { color: var(--text-muted); }
+.cred__row code { font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+.copy-btn { background: none; border: none; color: var(--gold); font-weight: 700; font-size: 0.8rem; padding: 2px 4px; }
+
+.empty { text-align: center; color: var(--text-muted); padding: 24px 0; }
+
+/* Toast ------------------------------------------------------------------ */
+.toast {
+  position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%) translateY(20px); z-index: 90;
+  padding: 12px 18px; border-radius: var(--radius-pill); background: var(--surface-2); border: 1px solid var(--gold-dark);
+  font-size: 0.9rem; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; max-width: calc(100vw - 32px);
+}
+.toast.show { opacity: 1; transform: translateX(-50%); }
+
+/* Bottom tab bar --------------------------------------------------------- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; justify-content: center;
+  background: var(--bg); border-top: 1px solid var(--border);
+}
+.tabbar__inner { width: 100%; max-width: 560px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px 20px calc(18px + env(safe-area-inset-bottom)); }
+.tab {
+  display: grid; place-items: center; min-height: 56px; border-radius: var(--radius); font-size: 1.05rem;
+  border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--text-muted); transition: border-color 0.15s, color 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-current="page"] { border-color: var(--gold); background: var(--gold-tint); color: var(--gold); }
+
+@media (max-width: 420px) {
+  .app-top { padding: 18px 16px; gap: 12px; }
+  .app-top .avatar { width: 54px; height: 54px; }
+  .upload-btn { width: 64px; height: 64px; font-size: 0.66rem; }
+  .channel .avatar { width: 72px; height: 72px; }
+  .tabbar__inner { gap: 8px; padding-inline: 12px; }
+  .tab { font-size: 0.95rem; }
+}
