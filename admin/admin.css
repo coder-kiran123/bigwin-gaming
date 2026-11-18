@@ -1204,3 +1204,6 @@ body {
   }
   .support-conv-panel { max-height: 320px; }
 }
+
+/* iOS: prevent auto-zoom on focus (fields must be >= 16px on phones) */
+@media (max-width: 768px) { input, select, textarea, .form-input, .form-select, .support-input, .sidebar-search input { font-size: 16px !important; } }

@@ -57,3 +57,11 @@ textarea.input { height: auto; min-height: 130px; padding: 12px 14px; resize: ve
 .not-found p { color: var(--text-muted); margin: 12px 0 28px; }
 
 @media (max-width: 720px) { .support-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .page-hero { padding: 36px 0 28px; }
+  .step { padding: 16px; gap: 14px; }
+  .step::before { width: 36px; height: 36px; font-size: 0.95rem; }
+  .support-grid { margin-bottom: 32px; }
+  .h-section { margin: 36px 0 14px; }
+  .legal h2 { margin-top: 24px; }
+}

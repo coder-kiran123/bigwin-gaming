@@ -2,13 +2,13 @@
    BigWin Gaming — Auth page (auth.html): welcome, login, create account
    ========================================================================== */
 
-.auth { min-height: 100vh; display: flex; justify-content: center; padding: 32px 16px 48px; }
+.auth { min-height: 100vh; min-height: 100dvh; display: flex; justify-content: center; padding: calc(32px + env(safe-area-inset-top)) 16px calc(48px + env(safe-area-inset-bottom)); }
 .auth__inner { width: 100%; max-width: 380px; }
 
 .view[hidden] { display: none; }
 
 /* Welcome (members-only splash) */
-.welcome { min-height: calc(100vh - 80px); display: flex; flex-direction: column; justify-content: center; text-align: center; }
+.welcome { min-height: calc(100vh - 80px); min-height: calc(100dvh - 80px); display: flex; flex-direction: column; justify-content: center; text-align: center; }
 .welcome .avatar { margin: 0 auto 28px; }
 .welcome h1 { color: var(--gold); font-size: 2rem; }
 .welcome .text-muted { margin: 8px 0 32px; }

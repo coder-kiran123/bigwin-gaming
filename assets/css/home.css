@@ -146,4 +146,30 @@
   .hero { padding: 48px 0; }
   .hero__suits { font-size: 70px; }
 }
-@media (max-width: 380px) { .games-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) {
+  .hero { padding: 36px 0 40px; }
+  .hero__logo { width: 88px; height: 88px; font-size: 1.9rem; margin-bottom: 18px; }
+  .hero__eyebrow { letter-spacing: 4px; font-size: 0.75rem; }
+  .hero__title { letter-spacing: 1px; font-size: clamp(2rem, 11vw, 3rem); }
+  .hero__tagline { letter-spacing: 1.5px; margin-bottom: 22px; }
+  .chips { gap: 8px; }
+  .chip { padding: 8px 12px; font-size: 0.82rem; }
+  .trust { flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+  .stat { padding: 20px 8px; }
+  .stat__label { letter-spacing: 1.5px; font-size: 0.68rem; }
+  .games-head { margin-bottom: 20px; }
+  .game-tile__name { font-size: 0.75rem; padding: 18px 6px 8px; }
+  .cta { padding: 40px 16px; }
+  .ticker__track { animation-duration: 28s; }
+  /* Modal: scrollable on short screens, sheet-style from the bottom */
+  .modal { place-items: end center; padding: 0; overflow-y: auto; }
+  .modal__box { max-width: none; border-radius: var(--radius) var(--radius) 0 0; padding-bottom: calc(22px + env(safe-area-inset-bottom)); max-height: 92dvh; overflow-y: auto; }
+}
+@media (max-width: 340px) { .games-grid { grid-template-columns: repeat(2, 1fr); } }
+/* Touch: no hover-lift, always show the PLAY badge */
+@media (hover: none) {
+  .game-tile:hover { transform: none; border-color: var(--border-strong); box-shadow: none; }
+  .game-tile:active { transform: scale(0.97); border-color: var(--gold); }
+  .game-tile__play { opacity: 1; }
+  .ticker:hover .ticker__track { animation-play-state: running; }
+}
