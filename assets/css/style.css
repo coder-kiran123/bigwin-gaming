@@ -202,6 +202,19 @@ h1, h2, h3, h4 { line-height: 1.2; font-weight: 800; }
 }
 .chat-fab svg { width: 28px; height: 28px; }
 
+/* Facebook / Telegram "message us" buttons */
+.social { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.social[hidden], [data-social-wrap][hidden] { display: none; }
+.social-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 14px;
+  border-radius: var(--radius-sm); font-weight: 700; font-size: 0.9rem; color: #fff; transition: filter 0.2s;
+}
+.social-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+.social-btn:hover { filter: brightness(1.12); }
+.social-btn--facebook { background: #0866ff; }
+.social-btn--telegram { background: #229ed9; }
+.social-label { text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 10px; }
+
 /* 9b. Mobile ------------------------------------------------------------ */
 /* iOS Safari auto-zooms on focus when a field's font-size is under 16px. */
 input, select, textarea { font-size: max(16px, 1em); }

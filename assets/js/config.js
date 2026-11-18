@@ -17,6 +17,13 @@ window.SITE = {
     year: new Date().getFullYear(),
   },
 
+  // "Message us" buttons. Paste your Facebook page username (facebook.com/THIS) and
+  // Telegram username (t.me/THIS) — full links work too. Leave "" to hide a button.
+  social: {
+    facebook: "",   // e.g. "BigWinGaming"  -> opens Messenger chat with your page
+    telegram: "",   // e.g. "BigWinSupport" -> opens Telegram chat
+  },
+
   // Home page stats row
   stats: [
     { icon: "users", value: "18,000+", label: "Members" },
