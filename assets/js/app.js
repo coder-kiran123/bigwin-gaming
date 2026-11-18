@@ -26,8 +26,6 @@
      /api/support/messages and /api/deposits, /api/withdrawals). */
   const api = {
     user: () => BW.session.get(),
-    chats: () => S.chats,
-    groups: () => S.groups,
     payments: () => store.get("bw-payments", S.payments),
     savePayment(p) { const list = [p, ...api.payments()]; store.set("bw-payments", list); return list; },
   };
@@ -87,84 +85,192 @@
     );
   }
 
-  /* ---------- Chats page ---------- */
-  function chatRow(c, pinned) {
-    const cls = ["chat-row", pinned ? "chat-row--pinned" : "", c.unread ? "chat-row--unread" : ""].join(" ");
-    return `<button class="${cls}" data-chat="${esc(c.id)}">
-      <div class="avatar ${c.gold ? "avatar--gold" : ""}">${esc(c.initials)}${c.online ? '<span class="status"></span>' : ""}</div>
+  /* ---------- Chats page (live support chat, server: /api/support/*) ---------- */
+  const IMG_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
+  // "2026-11-18 09:30:00" (UTC from the server) -> Date
+  function parseTime(t) {
+    if (!t) return null;
+    let s = String(t).replace(" ", "T");
+    if (!/[zZ]|[+-]\d\d:?\d\d$/.test(s)) s += "Z";
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  }
+  function ago(t) {
+    const d = parseTime(t);
+    if (!d) return "";
+    const m = Math.max(0, Math.round((Date.now() - d) / 60000));
+    if (m < 1) return "now";
+    if (m < 60) return `${m}m`;
+    if (m < 1440) return `${Math.round(m / 60)}h`;
+    return `${Math.round(m / 1440)}d`;
+  }
+  const previewText = (m) => (!m ? "Tap to chat with support" : IMG_RE.test(m.message) ? "📷 Photo" : (m.sender === "player" ? "You: " : "") + m.message);
+
+  function chatRow(c) {
+    const cls = ["chat-row", "chat-row--pinned", c.unread ? "chat-row--unread" : ""].join(" ");
+    const style = c.color ? ` style="background:${esc(c.color)};color:#fff"` : "";
+    return `<button class="${cls}" data-chat="${esc(c.name)}">
+      <div class="avatar ${c.color ? "" : "avatar--gold"}"${style}>${esc(c.icon || c.name.slice(0, 2).toUpperCase())}${c.is_online ? '<span class="status"></span>' : ""}</div>
       <div class="chat-row__body">
-        <div class="chat-row__name">${esc(c.name)}${pinned ? '<span class="pin">Pinned</span>' : ""}</div>
-        <div class="chat-row__preview">${esc(c.preview)}</div>
+        <div class="chat-row__name">${esc(c.name)}<span class="pin">Support</span></div>
+        <div class="chat-row__preview">${esc(previewText(c.last))}</div>
       </div>
-      <div class="chat-row__meta">${esc(c.time)}${c.unread ? `<span class="unread">${c.unread}</span>` : ""}</div>
+      <div class="chat-row__meta">${esc(c.last ? ago(c.last.created_at) : "")}${c.unread ? `<span class="unread">${c.unread}</span>` : ""}</div>
     </button>`;
   }
 
   function initChats() {
-    $("#channels").innerHTML = S.channels
+    $("#channels").innerHTML = (S.channels || [])
       .map((c) => `<button class="channel" type="button"><div class="avatar avatar--gold">${esc(c.initials)}</div>${esc(c.name)}</button>`)
       .join("");
-    $("#pinned").innerHTML = api.chats().map((c) => chatRow(c, true)).join("");
-    $("#groups").innerHTML = api.groups().map((c) => chatRow(c, false)).join("");
+    // Sample group chats aren't real conversations — hide that section
+    const gl = $(".list-label"); if (gl) gl.hidden = true;
+    $("#groups").hidden = true;
 
-    const all = [...api.chats(), ...api.groups()];
+    const pinned = $("#pinned");
     const convo = $("#convo");
     const msgs = $("#convo-msgs");
+    const input = $("#convo-input");
+    let agents = [];          // [{name, icon, color, is_online, last, unread, messages, lastId}]
     let current = null;
+    let pollTimer = null, listTimer = null;
 
-    const renderMsgs = () => {
-      msgs.innerHTML = current.messages
-        .map((m) => {
-          const mine = m.from === "me";
-          const from = !mine && m.from !== "them" ? `<span class="msg__from">${esc(m.from)}</span>` : "";
-          return `<div class="msg ${mine ? "msg--me" : "msg--them"}">${from}${esc(m.text)}</div>`;
-        })
-        .join("");
-      msgs.scrollTop = msgs.scrollHeight;
-    };
+    const byName = (n) => agents.find((a) => a.name === n);
 
-    const open = (id, push = true) => {
-      current = all.find((c) => c.id === id);
+    async function loadList() {
+      try {
+        const res = await BW.supportAgents();
+        const fresh = res.data && res.data.length ? res.data : [{ name: "BigWin Support", icon: "♛", is_online: true }];
+        // Fetch a preview of each conversation without marking it read
+        await Promise.all(fresh.map(async (a) => {
+          const old = byName(a.name) || {};
+          Object.assign(a, { messages: old.messages || [], lastId: old.lastId || 0 });
+          try {
+            const r = await BW.supportMessages(a.name, 0, true);
+            const list = r.data || [];
+            a.last = list[list.length - 1] || null;
+            a.unread = list.filter((m) => m.sender === "agent" && !m.is_read).length;
+          } catch (e) { a.last = null; a.unread = 0; }
+        }));
+        // Conversations with recent activity first, default agent otherwise
+        fresh.sort((x, y) => (y.last ? y.last.id : 0) - (x.last ? x.last.id : 0));
+        agents = fresh;
+        pinned.innerHTML = agents.map(chatRow).join("");
+      } catch (e) {
+        pinned.innerHTML = `<p class="empty">${esc(e.message)}</p>`;
+      }
+    }
+
+    function msgHtml(m) {
+      const mine = m.sender === "player";
+      const body = IMG_RE.test(m.message)
+        ? `<img src="${m.message}" alt="Photo" style="border-radius:10px;max-height:260px">`
+        : esc(m.message).replace(/\n/g, "<br>");
+      const time = parseTime(m.created_at);
+      const stamp = time ? `<small style="display:block;opacity:.6;font-size:.7rem;margin-top:4px;text-align:right">${time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>` : "";
+      return `<div class="msg ${mine ? "msg--me" : "msg--them"}${m.pending ? " msg--pending" : ""}"${m.pending ? ' style="opacity:.6"' : ""}>${body}${stamp}</div>`;
+    }
+    function renderMsgs() {
+      const nearBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+      msgs.innerHTML = current.messages.length
+        ? current.messages.map(msgHtml).join("")
+        : `<p class="empty">Say hi 👋 — our team usually replies within a few minutes.</p>`;
+      if (nearBottom || current.justOpened) msgs.scrollTop = msgs.scrollHeight;
+      current.justOpened = false;
+    }
+
+    async function fetchNew() {
+      if (!current) return;
+      const c = current;
+      try {
+        const r = await BW.supportMessages(c.name, c.lastId);
+        const list = r.data || [];
+        if (c !== current) return;
+        if (list.length) {
+          c.messages = c.messages.filter((m) => !m.pending).concat(list);
+          c.lastId = list[list.length - 1].id;
+          c.last = list[list.length - 1];
+          renderMsgs();
+        }
+      } catch (e) { /* network blip — try again on the next poll */ }
+    }
+
+    const open = async (name, push = true) => {
+      current = byName(name);
       if (!current) return;
       $("#convo-name").textContent = current.name;
-      $("#convo-status").textContent = current.online ? "Online" : "";
+      $("#convo-status").textContent = current.is_online ? "Online" : "Usually replies in minutes";
       const av = $("#convo-avatar");
-      av.textContent = current.initials;
-      av.classList.toggle("avatar--gold", !!current.gold);
+      av.textContent = current.icon || current.name.slice(0, 2).toUpperCase();
+      av.style.background = current.color || "";
+      av.style.color = current.color ? "#fff" : "";
+      av.classList.toggle("avatar--gold", !current.color);
       current.unread = 0;
-      const row = $(`[data-chat="${CSS.escape(id)}"]`);
+      const row = $(`[data-chat="${CSS.escape(name)}"]`);
       if (row) { row.classList.remove("chat-row--unread"); const u = $(".unread", row); if (u) u.remove(); }
-      renderMsgs();
+      current.justOpened = true;
       convo.hidden = false;
       document.body.style.overflow = "hidden";
-      if (push) history.pushState({ chat: id }, "", `?chat=${encodeURIComponent(id)}`);
-      $("#convo-input").focus();
+      if (push) history.pushState({ chat: name }, "", `?chat=${encodeURIComponent(name)}`);
+      renderMsgs();
+      await fetchNew();
+      clearInterval(pollTimer);
+      pollTimer = setInterval(fetchNew, 4000);
+      // Don't pop the keyboard on phones just from opening the chat
+      if (matchMedia("(hover: hover)").matches) input.focus();
     };
-    const close = () => { convo.hidden = true; document.body.style.overflow = ""; current = null; };
+    const close = () => {
+      convo.hidden = true; document.body.style.overflow = ""; current = null;
+      clearInterval(pollTimer);
+      loadList();
+    };
 
-    document.addEventListener("click", (e) => {
+    pinned.addEventListener("click", (e) => {
       const row = e.target.closest("[data-chat]");
       if (row) open(row.dataset.chat);
     });
-    $("#convo-back").addEventListener("click", () => history.back());
+    $("#convo-back").addEventListener("click", () => (history.state && history.state.chat ? history.back() : (history.replaceState(null, "", location.pathname), close())));
     window.addEventListener("popstate", () => {
       const id = new URLSearchParams(location.search).get("chat");
       id ? open(id, false) : close();
     });
 
-    $("#convo-form").addEventListener("submit", (e) => {
+    $("#convo-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const input = $("#convo-input");
       const text = input.value.trim();
       if (!text || !current) return;
-      // TODO: send via your chat backend / websocket.
-      current.messages.push({ from: "me", text });
+      const c = current;
       input.value = "";
+      const temp = { sender: "player", message: text, pending: true, created_at: new Date().toISOString() };
+      c.messages.push(temp);
+      c.justOpened = true; // scroll to the new message
       renderMsgs();
+      try {
+        await BW.sendSupportMessage(c.name, text);
+        await fetchNew();
+      } catch (err) {
+        c.messages = c.messages.filter((m) => m !== temp);
+        if (c === current) renderMsgs();
+        input.value = text;
+        toast(err.message);
+      }
     });
 
-    const startId = new URLSearchParams(location.search).get("chat");
-    if (startId) open(startId, false);
+    // Pause polling while the tab is in the background
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { clearInterval(pollTimer); clearInterval(listTimer); return; }
+      if (current) { fetchNew(); pollTimer = setInterval(fetchNew, 4000); }
+      else loadList();
+      listTimer = setInterval(() => !current && loadList(), 20000);
+    });
+
+    pinned.innerHTML = `<p class="empty">Loading chats…</p>`;
+    loadList().then(() => {
+      const startId = new URLSearchParams(location.search).get("chat");
+      if (startId && byName(startId)) open(startId, false);
+    });
+    listTimer = setInterval(() => !current && loadList(), 20000);
   }
 
   /* ---------- Payments page ---------- */

@@ -74,5 +74,13 @@ window.BW = (function () {
     gameAccounts: () => request(`/players/${pid()}/game-accounts`, { auth: true }),
     gameLogin: (game) => request(`/players/${pid()}/game-login?game=${encodeURIComponent(game)}`, { auth: true }),
     createGameAccount: (game) => request(`/players/${pid()}/create-game-account`, { method: "POST", body: { game }, auth: true }),
+    // Live support chat (one conversation per support agent)
+    supportAgents: () => request("/support/agents"),
+    supportMessages: (agent, sinceId = 0, preview = false) => {
+      const u = encodeURIComponent((session.get() || {}).username || "");
+      return request(`/support/messages?username=${u}&agent=${encodeURIComponent(agent)}&since_id=${sinceId}${preview ? "&preview=1" : ""}`, { auth: true });
+    },
+    sendSupportMessage: (agent, message) =>
+      request("/support/messages", { method: "POST", auth: true, body: { username: (session.get() || {}).username, agent, message, sender: "player" } }),
   };
 })();
