@@ -4155,6 +4155,72 @@ def _upsert_setting(db, key, value):
         db._conn.commit()
 
 
+# ── Facebook / Telegram "message us" links (Admin → Payment Methods → Contact Links) ──
+_SOCIAL_KEYS = {'facebook': 'social_facebook', 'telegram': 'social_telegram'}
+_SOCIAL_NAME = re.compile(r'^[A-Za-z0-9._-]{2,64}$')
+
+
+def _social_username(kind, value):
+    """'BigWin', '@BigWin' or a facebook.com / m.me / t.me link -> 'BigWin'. '' = clear. None = invalid."""
+    v = (value or '').strip()
+    if not v:
+        return ''
+    if '://' in v or v.lower().startswith(('www.', 'facebook.', 'fb.', 'm.me', 't.me', 'telegram.')):
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(v if '://' in v else 'https://' + v)
+        host = (u.hostname or '').lower()
+        hosts = ('facebook.com', 'fb.com', 'm.me') if kind == 'facebook' else ('t.me', 'telegram.me')
+        if not any(host == h or host.endswith('.' + h) for h in hosts):
+            return None
+        seg = [s for s in u.path.split('/') if s]
+        if seg and seg[0] == 'profile.php':
+            v = (parse_qs(u.query).get('id') or [''])[0]
+        else:
+            v = seg[0] if seg else ''
+    v = v.lstrip('@')
+    return v if _SOCIAL_NAME.match(v) else None
+
+
+def _social_links():
+    db = get_db()
+    try:
+        out = {}
+        for kind, key in _SOCIAL_KEYS.items():
+            row = db.execute('SELECT value FROM site_settings WHERE key=?', (key,)).fetchone()
+            out[kind] = (row['value'] if row else '') or ''
+        return out
+    finally:
+        db.close()
+
+
+@app.route('/api/site/social', methods=['GET'])
+def get_social_links():
+    """Public: Facebook page + Telegram usernames for the 'Message us' buttons."""
+    return ok(_social_links())
+
+
+@app.route('/api/admin/social-links', methods=['GET', 'POST'])
+@require_admin
+def admin_social_links():
+    if request.method == 'GET':
+        return ok(_social_links())
+    data  = request.json or {}
+    clean = {}
+    for kind in _SOCIAL_KEYS:
+        name = _social_username(kind, data.get(kind, ''))
+        if name is None:
+            label = 'Facebook page' if kind == 'facebook' else 'Telegram username'
+            return err(f'That {label} doesn\'t look right — paste the username or the full link.')
+        clean[kind] = name
+    db = get_db()
+    try:
+        for kind, key in _SOCIAL_KEYS.items():
+            _upsert_setting(db, key, clean[kind])
+    finally:
+        db.close()
+    return ok(clean, 'Saved — the buttons are live on the website.')
+
+
 @app.route('/api/deposit-settings', methods=['GET'])
 def get_deposit_settings():
     """Public: returns deposit screenshot requirement so wallet.html can enforce it."""

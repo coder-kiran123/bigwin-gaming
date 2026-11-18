@@ -1023,6 +1023,32 @@
         <div id="tgMsg" style="margin-top:12px;font-size:13px;min-height:18px"></div>
       </div>
 
+      <!-- Facebook / Telegram contact buttons on the website -->
+      <div class="section-card" style="margin-top:20px">
+        <h3 style="margin-bottom:4px">Contact Links (Facebook &amp; Telegram)</h3>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+          Shows <strong>Messenger</strong> and <strong>Telegram</strong> buttons in the website chat bubble, the Support page
+          and the player app. Paste your Facebook page link or username and your Telegram @username.
+          Leave a box empty to hide that button.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px">
+          <div>
+            <label for="socialFb" style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Facebook page</label>
+            <input id="socialFb" type="text" placeholder="facebook.com/YourPage or YourPage" autocomplete="off" style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--text);outline:none;box-sizing:border-box">
+          </div>
+          <div>
+            <label for="socialTg" style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Telegram username</label>
+            <input id="socialTg" type="text" placeholder="@YourUsername or t.me/YourUsername" autocomplete="off" style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--text);outline:none;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button onclick="saveSocialLinks()" style="background:linear-gradient(135deg,#0866ff,#229ed9);color:#fff;border:none;border-radius:10px;padding:10px 22px;font-size:14px;font-weight:700;cursor:pointer">
+            💾 Save Links
+          </button>
+          <span id="socialPreview" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div id="socialMsg" style="margin-top:12px;font-size:13px;min-height:18px"></div>
+      </div>
+
       <!-- Email (Gmail) for verification + password reset codes -->
       <div class="section-card" style="margin-top:20px">
         <h3 style="margin-bottom:4px">Email (Gmail or your own domain)</h3>

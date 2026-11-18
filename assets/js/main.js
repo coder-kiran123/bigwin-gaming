@@ -85,7 +85,20 @@
     return kind === "facebook" ? `https://m.me/${v}` : `https://t.me/${v}`;
   }
   function initSocial() {
-    const cfg = S.social || {};
+    renderSocial(S.social || {});
+    // Links saved in the admin panel take priority over config.js
+    if (location.protocol.startsWith("http")) {
+      fetch(`${S.apiBase || ""}/api/site/social`)
+        .then((r) => r.json())
+        .then((j) => {
+          if (!j || !j.success || !j.data) return;
+          const d = j.data, cfg = S.social || {};
+          renderSocial({ facebook: d.facebook || cfg.facebook, telegram: d.telegram || cfg.telegram });
+        })
+        .catch(() => {});
+    }
+  }
+  function renderSocial(cfg) {
     const links = [
       ["facebook", "Messenger", socialLink("facebook", cfg.facebook)],
       ["telegram", "Telegram", socialLink("telegram", cfg.telegram)],

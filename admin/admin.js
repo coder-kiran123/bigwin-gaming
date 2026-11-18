@@ -145,7 +145,7 @@ function showPage(pageId, clickedEl) {
   if (pageId === 'game-records')       renderGameRecords();
   if (pageId === 'game-analytics')     renderGameAnalytics();
   if (pageId === 'games-list')         renderGamesList();
-  if (pageId === 'payment-methods')    { renderPaymentMethods(); renderKeyhubConfig(); renderSmsConfig(); renderTelegramConfig(); renderEmailConfig(); }
+  if (pageId === 'payment-methods')    { renderPaymentMethods(); renderKeyhubConfig(); renderSmsConfig(); renderTelegramConfig(); renderEmailConfig(); renderSocialLinks(); }
   if (pageId === 'cashout-rules')      renderCashoutRules();
   if (pageId === 'support-chat')        { loadConversations(); }
   if (pageId === 'support-agents')      { renderSupportAgents(); }
@@ -1812,6 +1812,35 @@ async function disconnectTelegram() {
   const res = await apiFetch('/admin/telegram-disconnect', 'POST', {});
   _tgMsg(res.success ? '✅ ' + res.msg : (res.msg || 'Failed'), res.success ? '#16a34a' : '#ef4444');
   renderTelegramConfig();
+}
+
+// ── CONTACT LINKS (Facebook / Telegram buttons on the website) ──
+function _socialPreview(d) {
+  const parts = [];
+  if (d.facebook) parts.push('m.me/' + d.facebook);
+  if (d.telegram) parts.push('t.me/' + d.telegram);
+  const el = document.getElementById('socialPreview');
+  if (el) el.textContent = parts.length ? 'Live: ' + parts.join(' · ') : 'No buttons showing';
+}
+
+async function renderSocialLinks() {
+  const res = await apiFetch('/admin/social-links');
+  if (!res.success || !document.getElementById('socialFb')) return;
+  document.getElementById('socialFb').value = res.data.facebook || '';
+  document.getElementById('socialTg').value = res.data.telegram ? '@' + res.data.telegram : '';
+  _socialPreview(res.data);
+}
+
+async function saveSocialLinks() {
+  const m = document.getElementById('socialMsg');
+  m.style.color = 'var(--muted)'; m.textContent = 'Saving…';
+  const res = await apiFetch('/admin/social-links', 'POST', {
+    facebook: document.getElementById('socialFb').value.trim(),
+    telegram: document.getElementById('socialTg').value.trim(),
+  });
+  m.style.color = res.success ? '#16a34a' : '#ef4444';
+  m.textContent = res.success ? '✅ ' + res.msg : (res.msg || 'Save failed');
+  if (res.success) renderSocialLinks();
 }
 
 // ── EMAIL (GMAIL) ──
