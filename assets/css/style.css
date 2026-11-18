@@ -213,7 +213,8 @@ h1, h2, h3, h4 { line-height: 1.2; font-weight: 800; }
 .social-btn:hover { filter: brightness(1.12); }
 .social-btn--facebook { background: #0866ff; }
 .social-btn--telegram { background: #229ed9; }
-.social-label { text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 10px; }
+.social-btn--off { opacity: 0.55; cursor: default; }
+.social-btn--off:hover { filter: none; }.social-label { text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 10px; }
 
 /* 9b. Mobile ------------------------------------------------------------ */
 /* iOS Safari auto-zooms on focus when a field's font-size is under 16px. */

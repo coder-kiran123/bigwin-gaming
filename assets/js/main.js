@@ -102,14 +102,17 @@
     const links = [
       ["facebook", "Messenger", socialLink("facebook", cfg.facebook)],
       ["telegram", "Telegram", socialLink("telegram", cfg.telegram)],
-    ].filter((l) => l[2]);
+    ];
+    // Both buttons always show; one without a link (set in Admin → Contact Links) is greyed out as "soon"
     $$("[data-social]").forEach((box) => {
       box.innerHTML = links
-        .map(([k, label, href]) => `<a class="social-btn social-btn--${k}" href="${esc(href)}" target="_blank" rel="noopener">${SOCIAL_ICONS[k]}<span>${esc(label)}</span></a>`)
+        .map(([k, label, href]) => href
+          ? `<a class="social-btn social-btn--${k}" href="${esc(href)}" target="_blank" rel="noopener">${SOCIAL_ICONS[k]}<span>${esc(label)}</span></a>`
+          : `<span class="social-btn social-btn--${k} social-btn--off" aria-disabled="true" title="Coming soon">${SOCIAL_ICONS[k]}<span>${esc(label)}</span></span>`)
         .join("");
-      box.hidden = !links.length;
+      box.hidden = false;
     });
-    $$("[data-social-wrap]").forEach((w) => (w.hidden = !links.length));
+    $$("[data-social-wrap]").forEach((w) => (w.hidden = false));
   }
 
   document.addEventListener("DOMContentLoaded", () => {
