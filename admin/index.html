@@ -961,9 +961,17 @@
             <button class="lr-tab" data-lr="all" onclick="setLrFilter('all')">All</button>
           </div>
         </div>
-        <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
-          Players who paid and want a game loaded. Load it in the game's panel, then tap <strong>Loaded</strong> —
-          the player gets a message in their chat. Updates every 10 seconds.</p>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
+          Players who paid and want a game loaded. Check the payment, then either load it in the game's panel and tap
+          <strong>Loaded</strong>, or tap <strong>⚡ Auto-load</strong> and the site loads it for you. Either way the player
+          gets a message in their chat. Updates every 10 seconds.</p>
+        <div class="auto-switch" data-admin>
+          <label class="switch"><input type="checkbox" id="autoLoadToggle" onchange="setAutoLoad(this.checked)"><span></span></label>
+          <div>
+            <strong>Auto-load</strong> <span id="autoLoadState" class="auto-state">OFF</span>
+            <div class="lr-sub" id="autoLoadGames">Lets support load games with one tap through connected Backends.</div>
+          </div>
+        </div>
         <div id="lrList"></div>
       </div>
     </div>

@@ -1868,6 +1868,7 @@ async function renderLoadRequests() {
   const res = await apiFetch('/staff/load-requests?status=' + lrFilter);
   if (!res.success) { box.innerHTML = `<p style="color:#ef4444">${lrEsc(res.msg || 'Could not load')}</p>`; return; }
   lrBadge(res.data.pending);
+  if (getAdminToken()) renderAutoLoadSwitch();
   const list = res.data.requests;
   if (!list.length) {
     box.innerHTML = `<p style="color:var(--muted);padding:24px 0;text-align:center">${lrFilter === 'pending' ? '🎉 No loads waiting.' : 'No load requests yet.'}</p>`;
@@ -1890,12 +1891,42 @@ async function renderLoadRequests() {
       <div class="lr-side">
         ${lrImg(r.screenshot) ? `<a href="#" onclick="lrShowShot(${r.id});return false"><img class="lr-shot" src="${r.screenshot}" alt="Receipt"></a>` : ''}
         ${done ? `<span class="lr-chip" style="background:${chip[0]};color:${chip[1]}">${chip[2]}</span>`
-               : `<button class="lr-btn lr-btn--ok" onclick="finishLoad(${r.id},'loaded',this)">✅ Loaded</button>
+               : `${r.auto_ok ? `<button class="lr-btn lr-btn--auto" onclick="autoLoad(${r.id},this)">⚡ Auto-load</button>` : ''}
+                  <button class="lr-btn lr-btn--ok" onclick="finishLoad(${r.id},'loaded',this)">✅ Loaded</button>
                   <button class="lr-btn lr-btn--no" onclick="finishLoad(${r.id},'reject',this)">Reject</button>`}
       </div>
     </div>`;
   }).join('');
   window._lrCache = Object.fromEntries(list.map(r => [r.id, r]));
+}
+
+// ⚡ Auto-load: the server adds the credits on the game panel, then marks it Loaded
+async function autoLoad(id, btn) {
+  const r = (window._lrCache || {})[id];
+  if (r && !confirm(`Load $${Number(r.amount).toFixed(2)} into ${r.game_name} (${r.game_username}) now?\nOnly do this after you've checked the payment.`)) return;
+  btn.disabled = true; btn.textContent = 'Loading…';
+  const res = await apiFetch(`/staff/load-requests/${id}/auto`, 'POST', {});
+  alert(res.success ? res.msg : (res.msg || 'Auto-load failed') + '\n\nYou can still load it by hand and tap Loaded.');
+  renderLoadRequests();
+}
+
+// Admin switch: allow ⚡ Auto-load for everyone on staff
+async function renderAutoLoadSwitch() {
+  const res = await apiFetch('/admin/auto-load');
+  if (!res.success) return;
+  const t = document.getElementById('autoLoadToggle');
+  if (t) t.checked = res.data.enabled;
+  const st = document.getElementById('autoLoadState');
+  if (st) { st.textContent = res.data.enabled ? 'ON' : 'OFF'; st.classList.toggle('on', res.data.enabled); }
+  const g = document.getElementById('autoLoadGames');
+  if (g) g.textContent = res.data.games.length
+    ? 'Works for connected games: ' + res.data.games.join(', ') + '. The player must have a Game ID.'
+    : 'No games connected yet — attach them under Backends first.';
+}
+async function setAutoLoad(on) {
+  const res = await apiFetch('/admin/auto-load', 'POST', { enabled: on });
+  if (!res.success) alert(res.msg || 'Could not change the setting');
+  renderLoadRequests();
 }
 
 function lrShowShot(id) {

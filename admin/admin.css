@@ -1318,3 +1318,16 @@ a.kpi:hover { box-shadow: 0 4px 16px rgba(0,0,0,.06); transform: translateY(-1px
 .support-chat-panel, .support-conv-panel, .sch-info { min-width: 0; }
 .sch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 768px) { .support-admin-layout { grid-template-columns: minmax(0, 1fr) !important; } .msg-bubble { max-width: 80%; } }
+
+/* Auto-load switch + button */
+.auto-switch { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px; border-radius: 12px; background: #f9fafb; border: 1px solid var(--border); font-size: 14px; }
+.auto-state { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 99px; background: #e5e7eb; color: #374151; margin-left: 4px; }
+.auto-state.on { background: #fef3c7; color: #92400e; }
+.switch { position: relative; width: 46px; height: 26px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; border-radius: 99px; background: #d1d5db; cursor: pointer; transition: background .2s; }
+.switch span::before { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.switch input:checked + span { background: #b8962e; }
+.switch input:checked + span::before { transform: translateX(20px); }
+.lr-btn--auto { background: #1f2937; color: #fde68a; }
+@media (max-width: 768px) { .lr-side { flex-wrap: wrap; } .lr-btn--auto { flex-basis: 100%; } }

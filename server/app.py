@@ -4661,15 +4661,16 @@ def _lr_notify(r, method_name):
     _threading.Thread(target=run, daemon=True).start()
 
 
-def _lr_finish(rid, action, by, note=''):
+def _lr_finish(rid, action, by, note='', from_status='pending'):
     """Mark a pending load request loaded/rejected exactly once and tell the player in their chat.
-    Returns (ok, message, row)."""
+    Returns (ok, message, row). `from_status`='loading' finishes an auto-load that claimed the request."""
     status = 'loaded' if action == 'loaded' else 'rejected'
     db = get_db()
     try:
         cur = db.execute("UPDATE load_requests SET status=?, handled_by=?, note=?, handled_at=? "
-                         "WHERE id=? AND status='pending'",
-                         (status, by[:60], note[:300], datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), rid))
+                         "WHERE id=? AND status=?",
+                         (status, by[:60], note[:300], datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), rid,
+                          from_status))
         row = db.execute('SELECT * FROM load_requests WHERE id=?', (rid,)).fetchone()
         if not row:
             return False, 'Load request not found', None
@@ -4780,13 +4781,98 @@ def staff_load_requests():
             rows = db.execute("SELECT * FROM load_requests WHERE status='pending' ORDER BY id ASC LIMIT 100").fetchall()
         pending = db.execute("SELECT COUNT(*) AS n FROM load_requests WHERE status='pending'").fetchone()['n']
         names = {m['key']: m['name'] for m in db.execute('SELECT key, name FROM payment_methods').fetchall()}
+        auto_on = _auto_load_on(db)
+        ready = _auto_ready_games(db) if auto_on else set()
+        out = rows_to_list(rows)
+        for r in out:
+            r['game_name'] = _gname(r['game'])
+            r['method_name'] = names.get(r['method'], r['method'])
+            # ⚡ possible: switched on, game connected, and the player has a Game ID on it
+            ga = None
+            if r['status'] == 'pending' and r['game'] in ready:
+                ga = db.execute('SELECT game_username FROM game_accounts WHERE player_id=? AND game=?',
+                                (r['player_id'], r['game'])).fetchone()
+                if ga and not r['game_username']:
+                    r['game_username'] = ga['game_username']
+            r['auto_ok'] = bool(ga)
     finally:
         db.close()
-    out = rows_to_list(rows)
-    for r in out:
-        r['game_name'] = _gname(r['game'])
-        r['method_name'] = names.get(r['method'], r['method'])
-    return ok({'requests': out, 'pending': pending})
+    return ok({'requests': out, 'pending': pending, 'auto_enabled': auto_on})
+
+
+# ── Auto-load: support taps ⚡ and the server adds the credits on the game panel itself ──
+def _auto_load_on(db):
+    row = db.execute("SELECT value FROM site_settings WHERE key='auto_load_enabled'").fetchone()
+    return bool(row and row['value'] == '1')
+
+
+def _auto_ready_games(db):
+    """Games with a connected, switched-on backend (auto-load possible)."""
+    return {r['game'] for r in db.execute(
+        "SELECT DISTINCT game FROM backends WHERE status='connected' AND enabled=1").fetchall()}
+
+
+@app.route('/api/admin/auto-load', methods=['GET', 'POST'])
+@require_admin
+def admin_auto_load():
+    db = get_db()
+    try:
+        if request.method == 'POST':
+            on = bool((request.json or {}).get('enabled'))
+            _upsert_setting(db, 'auto_load_enabled', '1' if on else '0')
+        return ok({'enabled': _auto_load_on(db), 'games': sorted(_gname(g) for g in _auto_ready_games(db))},
+                  'Auto-load turned ' + ('ON' if _auto_load_on(db) else 'OFF') if request.method == 'POST' else 'OK')
+    finally:
+        db.close()
+
+
+@app.route('/api/staff/load-requests/<int:rid>/auto', methods=['POST'])
+def staff_auto_load(rid):
+    """Add the credits through the game's backend (no player wallet involved — they paid outside),
+    then finish the request like a manual 'Loaded'."""
+    by = _staff_name()
+    if not by:
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    db = get_db()
+    try:
+        if not _auto_load_on(db):
+            return err('Auto-load is turned off by the admin.')
+        # Claim it first so a manual tap or a second ⚡ can't load it twice
+        claim = db.execute("UPDATE load_requests SET status='loading' WHERE id=? AND status='pending'", (rid,))
+        db.commit()
+        row = db.execute('SELECT * FROM load_requests WHERE id=?', (rid,)).fetchone()
+        if not row:
+            return err('Load request not found', 404)
+        r = dict(row)
+        if claim.rowcount == 0:
+            return err(f"Already {r['status']}" + (f" by {r['handled_by']}" if r['handled_by'] else ''))
+
+        def release(msg):
+            db.execute("UPDATE load_requests SET status='pending' WHERE id=? AND status='loading'", (rid,))
+            db.commit()
+            return err(msg)
+
+        brow = db.execute("SELECT * FROM backends WHERE game=? AND status='connected' AND enabled=1 "
+                          "ORDER BY created_at DESC LIMIT 1", (r['game'],)).fetchone()
+        if not brow:
+            return release(f"{_gname(r['game'])} has no connected backend — load it by hand.")
+        ga = db.execute('SELECT game_username, external_id FROM game_accounts WHERE player_id=? AND game=?',
+                        (r['player_id'], r['game'])).fetchone()
+        if not ga:
+            return release('This player has no Game ID for this game yet — create one or load by hand.')
+        b = dict(brow)
+        try:
+            api = get_api(b['game'], b['username'], b['password'], b['token'], b['base_url'])
+            success, msg = api.add_credits(ga['game_username'], float(r['amount']), external_id=ga['external_id'] or '')
+        except Exception as ex:
+            success, msg = False, f'API error: {ex}'
+        if not success:
+            return release(f'Panel refused the load: {msg}')
+        _BAL_CACHE.pop((r['player_id'], r['game']), None)
+    finally:
+        db.close()
+    done, msg, _r = _lr_finish(rid, 'loaded', f'{by} (auto)', from_status='loading')
+    return ok(msg='⚡ Loaded automatically — the player was told in chat') if done else err(msg)
 
 
 @app.route('/api/staff/dashboard', methods=['GET'])
@@ -4843,7 +4929,7 @@ def staff_finish_load(rid, action):
         return jsonify({'success': False, 'msg': 'Staff only'}), 401
     if action not in ('loaded', 'reject'):
         return err('Unknown action', 404)
-    note = str((request.json or {}).get('note') or '').strip()
+    note = str((request.get_json(silent=True) or {}).get('note') or '').strip()
     done, msg, _r = _lr_finish(rid, action, by, note)
     return ok(msg=msg) if done else err(msg)
 
