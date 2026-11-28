@@ -322,55 +322,78 @@
     try { return await fn(); } finally { btn.disabled = false; btn.textContent = label; }
   }
 
-  async function initPayments() {
-    const form = $("#f-load"), box = $("#pay-box"), done = $("#pay-ok"), history = $("#pay-history");
-    const amountIn = $("#load-amount");
-    let methods = [], accounts = [];
-    let pick = { game: "", method: "" };
+  // Brand colour + symbol for well-known payment methods; anything else uses the icon set in admin
+  const METHOD_BRAND = {
+    cashapp: ["#00d64f", "$"], venmo: ["#008cff", "V"], paypal: ["#003087", "P"], zelle: ["#6d1ed4", "Z"],
+    chime: ["#1ec677", "C"], bitcoin: ["#f7931a", "₿"], btc: ["#f7931a", "₿"], usdt: ["#26a17b", "₮"],
+    applepay: ["#000000", ""], apple_pay: ["#000000", ""], googlepay: ["#4285f4", "G"], google_pay: ["#4285f4", "G"],
+  };
 
-    /* --- Game tiles (same games as the home page); first 8, the rest behind "Show all" --- */
-    const FIRST = 8;
-    $("#pick-game").innerHTML = S.games.map((g, i) => `
-      <button type="button" class="pick pick--game${i >= FIRST ? " is-extra" : ""}" role="radio" aria-checked="false" data-game="${esc(g.key)}">
+  /* Tile pickers shared by Load and Cash out. Each returns { value(), set(v) }. */
+  function gamePicker(grid, moreBtn, games, first = 8) {
+    let value = "";
+    grid.innerHTML = games.map((g, i) => `
+      <button type="button" class="pick pick--game${i >= first ? " is-extra" : ""}" role="radio" aria-checked="false" data-pick="${esc(g.key)}">
         ${g.image ? `<img src="../${esc(g.image)}" alt="" loading="lazy">` : `<span class="pick__art">${esc(g.name.slice(0, 2).toUpperCase())}</span>`}
         <span class="pick__name">${esc(g.name)}</span>
       </button>`).join("");
-    const moreBtn = $("#more-games");
-    const showAllGames = (all) => {
-      $("#pick-game").classList.toggle("show-all", all);
-      moreBtn.textContent = all ? "Show fewer games" : `Show all ${S.games.length} games`;
+    const showAll = (all) => {
+      grid.classList.toggle("show-all", all);
+      moreBtn.textContent = all ? "Show fewer games" : `Show all ${games.length} games`;
     };
-    if (S.games.length > FIRST) {
-      moreBtn.hidden = false;
-      showAllGames(false);
-      moreBtn.addEventListener("click", () => showAllGames(!$("#pick-game").classList.contains("show-all")));
+    moreBtn.hidden = games.length <= first;
+    if (!moreBtn.hidden) {
+      showAll(false);
+      moreBtn.onclick = () => showAll(!grid.classList.contains("show-all"));
     }
-
-    const select = (groupSel, attr, value) => {
-      $$(`${groupSel} [${attr}]`).forEach((b) => b.setAttribute("aria-checked", String(b.getAttribute(attr) === value)));
+    const set = (v) => {
+      value = v;
+      $$("[data-pick]", grid).forEach((b) => b.setAttribute("aria-checked", String(b.dataset.pick === v)));
+      if (v && games.findIndex((g) => g.key === v) >= first) showAll(true);
     };
-    $("#pick-game").addEventListener("click", (e) => {
-      const b = e.target.closest("[data-game]");
-      if (!b) return;
-      pick.game = b.dataset.game;
-      select("#pick-game", "data-game", pick.game);
-    });
-    $("#pick-method").addEventListener("click", (e) => {
-      const b = e.target.closest("[data-method]");
-      if (!b) return;
-      pick.method = b.dataset.method;
-      select("#pick-method", "data-method", pick.method);
-    });
+    grid.addEventListener("click", (e) => { const b = e.target.closest("[data-pick]"); if (b) set(b.dataset.pick); });
+    return { value: () => value, set };
+  }
 
-    /* --- Quick amounts --- */
-    const chips = $(".amounts[data-for]");
-    chips.addEventListener("click", (e) => {
+  function methodPicker(grid, methods) {
+    let value = "";
+    grid.innerHTML = methods.length
+      ? methods.map((m) => {
+          const [bg, sym] = METHOD_BRAND[String(m.key).toLowerCase()] || ["var(--surface-2)", m.icon || "💳"];
+          return `<button type="button" class="pick pick--method" role="radio" aria-checked="false" data-pick="${esc(m.key)}">
+            <span class="pick__icon" style="background:${bg}">${esc(sym)}</span><span class="pick__name">${esc(m.name)}</span></button>`;
+        }).join("")
+      : '<p class="empty">No payment methods yet — message support in Chats.</p>';
+    const set = (v) => {
+      value = v;
+      $$("[data-pick]", grid).forEach((b) => b.setAttribute("aria-checked", String(b.dataset.pick === v)));
+    };
+    grid.addEventListener("click", (e) => { const b = e.target.closest("[data-pick]"); if (b) set(b.dataset.pick); });
+    if (methods.length === 1) set(methods[0].key);
+    return { value: () => value, set };
+  }
+
+  // $10 / $20 … buttons that fill an amount box
+  function amountChips(box) {
+    const input = $("#" + box.dataset.for);
+    const clear = () => $$("button", box).forEach((x) => x.classList.remove("active"));
+    box.addEventListener("click", (e) => {
       const b = e.target.closest("[data-amount]");
       if (!b) return;
-      amountIn.value = b.dataset.amount;
-      $$("button", chips).forEach((x) => x.classList.toggle("active", x === b));
+      input.value = b.dataset.amount;
+      $$("button", box).forEach((x) => x.classList.toggle("active", x === b));
     });
-    amountIn.addEventListener("input", () => $$("button", chips).forEach((x) => x.classList.remove("active")));
+    input.addEventListener("input", clear);
+    return { clear };
+  }
+
+  async function initPayments() {
+    const form = $("#f-load"), coForm = $("#f-cashout"), box = $("#pay-box"), done = $("#pay-ok"), history = $("#pay-history");
+    const amountIn = $("#load-amount");
+    let methods = [], accounts = [];
+
+    $$(".amounts[data-for]").forEach(amountChips);
+    const chipsFor = (id) => ({ clear: () => $$(`.amounts[data-for="${id}"] button`).forEach((x) => x.classList.remove("active")) });
 
     /* --- Data --- */
     async function loadHistory() {
@@ -384,44 +407,43 @@
       BW.paymentMethods().then((r) => (methods = r.data || [])).catch(() => {}),
       BW.gameAccounts().then((r) => (accounts = r.data || [])).catch(() => {}),
     ]);
-    // Brand colour + symbol for well-known methods; anything else uses the icon set in admin
-    const BRAND = {
-      cashapp: ["#00d64f", "$"], venmo: ["#008cff", "V"], paypal: ["#003087", "P"], zelle: ["#6d1ed4", "Z"],
-      chime: ["#1ec677", "C"], bitcoin: ["#f7931a", "₿"], btc: ["#f7931a", "₿"], usdt: ["#26a17b", "₮"],
-      applepay: ["#000000", ""], apple_pay: ["#000000", ""], googlepay: ["#4285f4", "G"], google_pay: ["#4285f4", "G"],
-    };
-    $("#pick-method").innerHTML = methods.length
-      ? methods.map((m) => {
-          const [bg, sym] = BRAND[String(m.key).toLowerCase()] || ["var(--surface-2)", m.icon || "💳"];
-          return `<button type="button" class="pick pick--method" role="radio" aria-checked="false" data-method="${esc(m.key)}">
-            <span class="pick__icon" style="background:${bg}">${esc(sym)}</span><span class="pick__name">${esc(m.name)}</span></button>`;
-        }).join("")
-      : '<p class="empty">No payment methods yet — message support in Chats.</p>';
-    if (methods.length === 1) { pick.method = methods[0].key; select("#pick-method", "data-method", pick.method); }
     loadHistory();
     document.addEventListener("visibilitychange", () => { if (!document.hidden) loadHistory(); });
 
+    // Load: every game. Cash out: the player's own games (all games if they have none yet).
+    const myGames = S.games.filter((g) => accounts.some((a) => a.game === g.key));
+    const loadGame = gamePicker($("#pick-game"), $("#more-games"), S.games);
+    const loadMethod = methodPicker($("#pick-method"), methods);
+    const coGame = gamePicker($("#co-game"), $("#co-more"), myGames.length ? myGames : S.games);
+    const coMethod = methodPicker($("#co-method"), methods);
+
     // Opened from a game tile elsewhere (?game=juwa) → preselect it
     const pre = new URLSearchParams(location.search).get("game");
-    if (pre && S.games.some((g) => g.key === pre)) {
-      pick.game = pre; select("#pick-game", "data-game", pre);
-      if (S.games.findIndex((g) => g.key === pre) >= FIRST) showAllGames(true);
-    }
+    if (pre && S.games.some((g) => g.key === pre)) loadGame.set(pre);
 
-    /* --- Step 4: show how to pay --- */
+    /* --- Screens --- */
     const showStep = (which) => {
-      form.hidden = which !== "form"; box.hidden = which !== "pay"; done.hidden = which !== "done";
+      form.hidden = which !== "form"; coForm.hidden = which !== "cashout";
+      box.hidden = which !== "pay"; done.hidden = which !== "done";
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
+    const setMode = (mode) => {
+      $$("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === mode)));
+      showStep(mode === "cashout" ? "cashout" : "form");
+    };
+    $$("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+    /* --- Load: show how to pay --- */
+    let pending = null;   // { game, method, amount }
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      const amount = parseFloat(amountIn.value);
-      if (!pick.game) return toast("Choose a game first.");
+      const game = loadGame.value(), method = loadMethod.value(), amount = parseFloat(amountIn.value);
+      if (!game) return toast("Choose a game first.");
+      if (!method) return toast("Choose how you'll pay.");
       if (!amount || amount < 5) return toast("Minimum amount is $5.");
-      if (!pick.method) return toast("Choose how you'll pay.");
-      const g = gameInfo(pick.game);
-      const m = methods.find((x) => x.key === pick.method) || { name: pick.method };
-      const acc = accounts.find((a) => a.game === pick.game);
+      const g = gameInfo(game);
+      const m = methods.find((x) => x.key === method) || { name: method };
+      const acc = accounts.find((a) => a.game === game);
       $("#pay-sum").innerHTML = `<strong>${money(amount)}</strong> → ${esc(g.name)}${acc ? ` <small>(${esc(acc.game_username)})</small>` : ""}
         <span>Pay with ${esc(m.name)}</span>`;
       const parts = [];
@@ -434,77 +456,59 @@
       parts.unshift(`<p class="pay-step">Send exactly <strong>${money(amount)}</strong>:</p>`);
       $("#pay-details").innerHTML = parts.join("");
       $("#pay-shot").value = "";
-      box.dataset.amount = amount;
+      pending = { game, method, amount };
       showStep("pay");
     });
     $("#pay-back").addEventListener("click", () => showStep("form"));
-
-    /* --- Load / Cash out tabs --- */
-    const coForm = $("#f-cashout");
-    $$("[data-mode]").forEach((b) => b.addEventListener("click", () => {
-      $$("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-      const cash = b.dataset.mode === "cashout";
-      coForm.hidden = !cash;
-      form.hidden = cash; box.hidden = true; done.hidden = true;
-    }));
-
-    /* --- Cash out → a message to support (handled by hand, alert also goes to Telegram) --- */
-    const myGames = S.games.filter((g) => accounts.some((a) => a.game === g.key));
-    $("#co-game").innerHTML = '<option value="">Select a game</option>' +
-      (myGames.length ? myGames : S.games).map((g) => `<option value="${esc(g.key)}">${esc(g.name)}</option>`).join("");
-    $("#co-method").innerHTML = '<option value="">Select a method</option>' +
-      (methods.length ? methods.map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
-                      : (S.paymentMethods || []).map((m) => `<option>${esc(m)}</option>`)).join("");
-    coForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const game = $("#co-game").value, amount = parseFloat($("#co-amount").value);
-      const method = $("#co-method").value, address = $("#co-address").value.trim();
-      if (!game) return toast("Please choose a game.");
-      if (!amount || amount <= 0) return toast("Enter an amount.");
-      if (!method) return toast("Choose how you want to receive it.");
-      if (!address) return toast("Enter where we should send it.");
-      const acc = accounts.find((a) => a.game === game);
-      const text = `💸 Cashout request\nGame: ${gameInfo(game).name}${acc ? ` (${acc.game_username})` : ""}\n` +
-                   `Amount: ${money(amount)}\nSend to: ${method} — ${address}`;
-      await busyBtn($("button[type=submit]", coForm), "Sending…", async () => {
-        try {
-          const agents = (await BW.supportAgents()).data || [];
-          await BW.sendSupportMessage((agents[0] && agents[0].name) || "BigWin Support", text);
-          coForm.reset();
-          $("#pay-ok-text").textContent = `Support will cash out ${money(amount)} from ${gameInfo(game).name} and message you in Chats when it's sent.`;
-          coForm.hidden = true;
-          showStep("done");
-        } catch (err) { toast(err.message); }
-      });
-    });
     box.addEventListener("click", async (e) => {
       const c = e.target.closest("[data-copy]");
       if (!c) return;
       try { await navigator.clipboard.writeText(c.dataset.copy); toast("Copied."); } catch (err) { toast("Couldn't copy — please copy it manually."); }
     });
 
-    /* --- "I've paid" → load request --- */
+    /* --- "I've paid" → load request (support loads by hand, taps Loaded) --- */
     $("#pay-done").addEventListener("click", async (e) => {
+      if (!pending) return;
       await busyBtn(e.currentTarget, "Sending…", async () => {
         try {
           const file = $("#pay-shot").files[0];
           const shot = file ? await shrinkImage(file) : "";
-          const amount = parseFloat(box.dataset.amount);
-          const r = await BW.createLoadRequest(pick.game, amount, pick.method, shot);
-          $("#pay-ok-text").textContent = `We'll load ${money(amount)} into ${gameInfo(pick.game).name} and message you in Chats as soon as it's done.`;
-          form.reset();
-          $$("button", chips).forEach((x) => x.classList.remove("active"));
+          const r = await BW.createLoadRequest(pending.game, pending.amount, pending.method, shot);
+          $("#pay-ok-text").textContent = `We'll load ${money(pending.amount)} into ${gameInfo(pending.game).name} and message you in Chats as soon as it's done.`;
+          form.reset(); chipsFor("load-amount").clear(); loadGame.set("");
+          pending = null;
           showStep("done");
           loadHistory();
           if (r.msg) toast(r.msg);
         } catch (err) { toast(err.message); }
       });
     });
-    $("#pay-again").addEventListener("click", () => {
-      pick.game = ""; select("#pick-game", "data-game", "");
-      $$("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === "load")));
-      showStep("form");
+
+    /* --- Cash out → a message to support (handled by hand; also alerts Telegram) --- */
+    coForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const game = coGame.value(), methodKey = coMethod.value();
+      const amount = parseFloat($("#co-amount").value), address = $("#co-address").value.trim();
+      if (!game) return toast("Choose the game to cash out from.");
+      if (!methodKey) return toast("Choose how you want to receive it.");
+      if (!amount || amount <= 0) return toast("Enter an amount.");
+      if (!address) return toast("Enter where we should send it.");
+      const m = methods.find((x) => x.key === methodKey) || { name: methodKey };
+      const acc = accounts.find((a) => a.game === game);
+      const text = `💸 Cashout request\nGame: ${gameInfo(game).name}${acc ? ` (${acc.game_username})` : ""}\n` +
+                   `Amount: ${money(amount)}\nSend to: ${m.name} — ${address}`;
+      await busyBtn($("button[type=submit]", coForm), "Sending…", async () => {
+        try {
+          const agents = (await BW.supportAgents()).data || [];
+          await BW.sendSupportMessage((agents[0] && agents[0].name) || "BigWin Support", text);
+          coForm.reset(); chipsFor("co-amount").clear(); coGame.set("");
+          $("#pay-ok-text").textContent = `Support will cash out ${money(amount)} from ${gameInfo(game).name} and message you in Chats when it's sent.`;
+          showStep("done");
+        } catch (err) { toast(err.message); }
+      });
     });
+
+    $("#pay-again").addEventListener("click", () => setMode("load"));
   }
 
   /* ---------- Game ID page (live: server creates the account on the game's agent portal) ---------- */

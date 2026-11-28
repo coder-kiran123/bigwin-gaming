@@ -39,23 +39,32 @@
 
       <!-- Cash out: goes to support as a chat message; support pays out by hand -->
       <form id="f-cashout" class="panel stack gap-20" novalidate hidden>
-        <p class="text-muted" style="margin:0">Tell us what to cash out. Support checks your game balance and sends the money — you'll get a message in Chats.</p>
-        <div class="field">
-          <label for="co-game">Game <span class="req">*</span></label>
-          <select class="input" id="co-game"></select>
+        <div>
+          <h2 class="step-title"><span>1</span>Cash out from</h2>
+          <div class="pick-grid pick-grid--games" id="co-game" role="radiogroup" aria-label="Game"></div>
+          <button type="button" class="more-btn" id="co-more" hidden></button>
         </div>
-        <div class="field">
-          <label for="co-amount">Amount <span class="req">*</span></label>
-          <input class="input" id="co-amount" type="number" min="1" step="0.01" inputmode="decimal" placeholder="$0">
+
+        <div>
+          <h2 class="step-title"><span>2</span>Receive with</h2>
+          <div class="pick-grid pick-grid--methods" id="co-method" role="radiogroup" aria-label="Payment method"></div>
         </div>
+
         <div class="field">
-          <label for="co-method">Receive with <span class="req">*</span></label>
-          <select class="input" id="co-method"></select>
+          <h2 class="step-title"><span>3</span><label for="co-amount">Amount</label></h2>
+          <div class="amounts amounts--grid" data-for="co-amount">
+            <button type="button" data-amount="20">$20</button><button type="button" data-amount="50">$50</button>
+            <button type="button" data-amount="100">$100</button><button type="button" data-amount="200">$200</button>
+          </div>
+          <input class="input input--big" id="co-amount" type="number" min="1" step="0.01" inputmode="decimal" placeholder="Other amount">
         </div>
+
         <div class="field">
-          <label for="co-address">Send it to <span class="req">*</span></label>
-          <input class="input" id="co-address" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="$Cashtag, email, phone or wallet">
+          <h2 class="step-title"><span>4</span><label for="co-address">Send it to</label></h2>
+          <input class="input" id="co-address" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="$Cashtag, email or wallet">
+          <p class="hint">Support checks your game balance, sends the money and messages you in Chats.</p>
         </div>
+
         <button type="submit" class="btn btn--gold btn--block">Request cashout</button>
       </form>
 
