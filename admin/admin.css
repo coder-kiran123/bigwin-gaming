@@ -1226,3 +1226,95 @@ body {
 .lr-chip { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 99px; }
 .lr-copy { background: none; border: none; color: #b8962e; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0 2px; }
 @media (max-width: 768px) { .lr-side { width: 100%; } .lr-btn { flex: 1; } }
+
+/* ── Staff login: Admin / Support agent ── */
+.login-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin-bottom: 14px; border-radius: 12px; background: #0a1020; border: 1.5px solid #1e2d4a; }
+.login-mode button { border: none; background: none; color: #9ca3af; font-weight: 700; font-size: 14px; padding: 10px; border-radius: 9px; cursor: pointer; font-family: inherit; }
+.login-mode button[aria-pressed="true"] { background: #c9a227; color: #111; }
+.login-field[hidden] { display: none; }
+#agentNameField input { padding-right: 18px; }
+
+/* Support agents only see Load Requests + Live Support */
+body.role-agent [data-admin] { display: none !important; }
+
+/* Sidebar badges */
+.nav-badge { background: #ef4444; color: #fff; font-size: 11px; font-weight: 700; border-radius: 99px; padding: 1px 7px; margin-left: auto; }
+
+/* ── Dashboard ── */
+.dash-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.dash-head h2 { font-size: 22px; margin: 0; }
+.dash-head p { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+.dash-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.kpi { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-radius: 14px; background: #fff; border: 1px solid var(--border); text-decoration: none; color: inherit; transition: box-shadow .15s, transform .15s; }
+a.kpi:hover { box-shadow: 0 4px 16px rgba(0,0,0,.06); transform: translateY(-1px); }
+.kpi-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.kpi-val { font-size: 28px; font-weight: 900; line-height: 1.1; }
+.kpi-sub { font-size: 12px; color: var(--muted); }
+.kpi--alert.is-hot { background: #fffbeb; border-color: #f59e0b; }
+.kpi--alert.is-hot .kpi-val { color: #b45309; }
+.dash-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-bottom: 16px; }
+.dash-grid .section-card, .dash-grid + .section-card { margin-bottom: 0; }
+.week-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; height: 170px; align-items: end; padding-top: 8px; }
+.wk { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
+.wk-bar { width: 100%; max-width: 38px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #e2c46a, #b8962e); }
+.wk-amt { font-size: 10px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.wk-day { font-size: 11px; color: var(--muted); }
+.top-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.top-row:first-child { border-top: none; }
+.top-rank { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+.top-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-n { color: var(--muted); font-size: 12px; }
+.dash-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.dash-row:first-child { border-top: none; }
+.dash-amt { min-width: 80px; color: #b8962e; font-size: 16px; }
+.dash-mid { flex: 1; min-width: 0; font-size: 14px; }
+.dash-mid .lr-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-empty { color: var(--muted); text-align: center; padding: 18px 0; font-size: 13px; }
+
+/* ── Phones ── */
+@media (max-width: 900px) {
+  .dash-kpis { grid-template-columns: 1fr 1fr; }
+  .dash-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  /* iOS zooms into fields under 16px */
+  input, select, textarea { font-size: 16px !important; }
+  .kpi { padding: 12px; }
+  .kpi-val { font-size: 22px; }
+  .week-chart { height: 140px; gap: 4px; }
+  .wk-amt { font-size: 9px; }
+  .btn-admin-logout { font-size: 0; gap: 0; }
+  .btn-admin-logout svg { width: 16px; height: 16px; }
+  .topbar { position: sticky; top: 0; z-index: 50; }
+  /* Live Support: list and chat take the full width, one at a time */
+  .support-admin-layout { height: calc(100dvh - 60px) !important; }
+}
+.sch-back { display: none; background: none; border: none; color: #e2e8f0; font-size: 30px; line-height: 1; padding: 0 6px 0 0; cursor: pointer; }
+@media (max-width: 768px) {
+  /* Live Support on phones: list OR chat, full height, like a messaging app */
+  .support-admin-layout { grid-template-columns: 1fr !important; border-radius: 12px; }
+  .support-conv-panel { max-height: none !important; }
+  .support-admin-layout:not(.has-chat) .support-chat-panel { display: none; }
+  .support-admin-layout.has-chat .support-conv-panel { display: none; }
+  .sch-back { display: block; }
+  #page-support-chat { padding: 8px !important; }
+}
+/* Grids must be allowed to shrink below their content on phones */
+.dash-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dash-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.week-chart { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.main-content, .page-body, .page { min-width: 0; }
+.kpi-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) {
+  .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 768px) { .main-content { overflow-x: hidden; } .kpi-label { font-size: 10.5px; letter-spacing: .3px; } }
+
+/* Line breaks come from <br>; pre-wrap also showed the template indentation */
+.msg-bubble { white-space: normal; }
+.msg-bubble .msg-time { display: block; }
+.support-admin-layout { grid-template-columns: 300px minmax(0, 1fr); }
+.support-chat-panel, .support-conv-panel, .sch-info { min-width: 0; }
+.sch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 768px) { .support-admin-layout { grid-template-columns: minmax(0, 1fr) !important; } .msg-bubble { max-width: 80%; } }

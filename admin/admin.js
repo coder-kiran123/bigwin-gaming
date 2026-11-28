@@ -1,65 +1,96 @@
 // ── API CONFIG ──
 const API = '/api';   // admin is served by the same server as the API
 
-// ── ADMIN AUTH GATE ──
-const ADMIN_TOKEN_KEY = 'bw_admin_token';
+// ── STAFF AUTH: admin (full access) or support agent (Load Requests + Live Support) ──
+const ADMIN_TOKEN_KEY   = 'bw_admin_token';
+const SUPPORT_TOKEN_KEY = 'bw_support_token';
+const SUPPORT_NAME_KEY  = 'bw_support_name';
+const _ls = {
+  get: k => { try { return sessionStorage.getItem(k) || localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { sessionStorage.setItem(k, v); localStorage.setItem(k, v); } catch (e) {} },
+  del: k => { try { sessionStorage.removeItem(k); localStorage.removeItem(k); } catch (e) {} },
+};
+function getAdminToken()   { return _ls.get(ADMIN_TOKEN_KEY); }
+function getSupportToken() { return _ls.get(SUPPORT_TOKEN_KEY); }
+function isAgent()  { return !getAdminToken() && !!getSupportToken(); }
+function isStaff()  { return !!(getAdminToken() || getSupportToken()); }
+function staffHeaders() {
+  const t = getAdminToken();
+  if (t) return { 'X-Admin-Token': t };
+  const st = getSupportToken();
+  return st ? { 'X-Support-Token': st } : {};
+}
+function setAdminToken(t) { _ls.set(ADMIN_TOKEN_KEY, t); }
+function clearAdminToken() { [ADMIN_TOKEN_KEY, SUPPORT_TOKEN_KEY, SUPPORT_NAME_KEY, 'fp_admin_token'].forEach(_ls.del); }
 
-function getAdminToken() { return sessionStorage.getItem(ADMIN_TOKEN_KEY) || localStorage.getItem(ADMIN_TOKEN_KEY); }
-function setAdminToken(t) { sessionStorage.setItem(ADMIN_TOKEN_KEY, t); localStorage.setItem(ADMIN_TOKEN_KEY, t); }
-function clearAdminToken() { sessionStorage.removeItem(ADMIN_TOKEN_KEY); localStorage.removeItem(ADMIN_TOKEN_KEY); }
+let loginMode = 'admin';
+function setLoginMode(mode) {
+  loginMode = mode;
+  document.querySelectorAll('[data-login]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.login === mode)));
+  document.getElementById('agentNameField').hidden = mode !== 'agent';
+  document.getElementById('adminPwInput').placeholder = mode === 'agent' ? 'Agent password' : 'Admin password';
+  document.getElementById('loginErr').textContent = '';
+  (mode === 'agent' ? document.getElementById('agentNameInput') : document.getElementById('adminPwInput')).focus();
+}
 
 async function doAdminLogin() {
-  const pw  = (document.getElementById('adminPwInput').value || '').trim();
-  const err = document.getElementById('loginErr');
-  const btn = document.getElementById('adminLoginBtn');
+  const pw   = (document.getElementById('adminPwInput').value || '').trim();
+  const name = (document.getElementById('agentNameInput').value || '').trim();
+  const err  = document.getElementById('loginErr');
+  const btn  = document.getElementById('adminLoginBtn');
   err.textContent = '';
-  if (!pw) { err.textContent = 'Enter your admin password'; return; }
-  btn.textContent = 'Verifying…'; btn.disabled = true;
+  if (loginMode === 'agent' && !name) { err.textContent = 'Enter your agent name'; return; }
+  if (!pw) { err.textContent = 'Enter your password'; return; }
+  btn.textContent = 'Checking…'; btn.disabled = true;
   try {
-    const r = await fetch(API + '/admin/login', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({password: pw})
+    const agent = loginMode === 'agent';
+    const r = await fetch(API + (agent ? '/support/agent-login' : '/admin/login'), {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(agent ? { name, password: pw } : { password: pw })
     });
     const d = await r.json();
     if (d.success) {
-      setAdminToken(d.token);
+      clearAdminToken();
+      if (agent) { _ls.set(SUPPORT_TOKEN_KEY, d.data.token); _ls.set(SUPPORT_NAME_KEY, d.data.name); }
+      else setAdminToken(d.token);
+      document.getElementById('adminPwInput').value = '';
       document.getElementById('adminLoginGate').style.display = 'none';
       initAdmin();
     } else {
       err.textContent = d.msg || 'Incorrect password';
     }
-  } catch(e) {
+  } catch (e) {
     err.textContent = 'Network error — check your connection';
   }
-  btn.textContent = 'Unlock Admin'; btn.disabled = false;
+  btn.textContent = 'Sign in'; btn.disabled = false;
 }
 
-function toggleLoginEye(btn) {
+function toggleLoginEye() {
   const inp = document.getElementById('adminPwInput');
   inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
+function adminLogout() {
+  clearAdminToken();
+  location.reload();
+}
+
 async function checkAdminAuth() {
-  const token = getAdminToken();
-  const gate  = document.getElementById('adminLoginGate');
-  if (!token) { if (gate) gate.style.display = ''; return; } // gate stays visible
+  const gate = document.getElementById('adminLoginGate');
+  if (!isStaff()) { if (gate) gate.style.display = ''; return; }
   try {
-    const r = await fetch(API + '/admin/verify', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token})
-    });
-    const d = await r.json();
-    if (d.success) {
-      if (gate) gate.style.display = 'none';
-      initAdmin();
+    let ok;
+    if (getAdminToken()) {
+      const r = await fetch(API + '/admin/verify', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                     body: JSON.stringify({ token: getAdminToken() }) });
+      ok = (await r.json()).success;
     } else {
-      clearAdminToken();
-      if (gate) gate.style.display = ''; // token rejected — show login again, don't touch dashboard
+      ok = (await fetch(API + '/staff/load-requests', { headers: staffHeaders() })).ok;
     }
-  } catch(e) {
-    // offline — let stored token be used optimistically rather than locking the admin out
+    if (ok) { if (gate) gate.style.display = 'none'; initAdmin(); }
+    else { clearAdminToken(); if (gate) gate.style.display = ''; }
+  } catch (e) {
+    // offline — use the stored token rather than locking staff out
     if (gate) gate.style.display = 'none';
     initAdmin();
   }
@@ -67,9 +98,7 @@ async function checkAdminAuth() {
 
 async function apiFetch(path, method='GET', body=null) {
   try {
-    const token = getAdminToken();
-    const opts = { method, headers: {'Content-Type': 'application/json'} };
-    if (token) opts.headers['X-Admin-Token'] = token;
+    const opts = { method, headers: Object.assign({'Content-Type': 'application/json'}, staffHeaders()) };
     if (body) opts.body = JSON.stringify(body);
     const r = await fetch(API + path, opts);
     if (r.status === 401) { clearAdminToken(); location.reload(); return {success:false}; }
@@ -99,6 +128,7 @@ function showPage(pageId, clickedEl) {
   if (page) page.classList.add('active');
 
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  if (!clickedEl) clickedEl = document.querySelector(`.nav-item[data-page="${pageId}"]`);
   if (clickedEl) {
     const navItem = clickedEl.closest ? clickedEl.closest('.nav-item') : clickedEl;
     if (navItem) navItem.classList.add('active');
@@ -121,7 +151,8 @@ function showPage(pageId, clickedEl) {
     'roulette-admin':     'Roulette Wheel',
     'marketplace-admin':  'Marketplace',
     'games-list':         'Games',
-    'payment-methods':    'Payment Methods',
+    'backend-attach':     'Backends',
+    'payment-methods':    'Payments & Settings',
     'cashout-rules':      'Cashout Rules',
     'support-chat':       'Live Support',
     'load-requests':      'Load Requests',
@@ -132,6 +163,7 @@ function showPage(pageId, clickedEl) {
   // close sidebar on mobile after navigation
   if (window.innerWidth <= 768) closeSidebar();
 
+  if (pageId === 'dashboard')          renderDashboard();
   if (pageId === 'provider-balance')   { renderProviders(); loadServerIP(); }
   if (pageId === 'players')            renderPlayers();
   if (pageId === 'transactions')       renderAllTxns();
@@ -1818,7 +1850,7 @@ async function disconnectTelegram() {
 
 // ── LOAD REQUESTS (player paid → load the game by hand → tap Loaded) ──
 let lrFilter = 'pending';
-const lrEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function lrEsc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const lrImg = s => /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s || '');
 
 function setLrFilter(f) { lrFilter = f; renderLoadRequests(); }
@@ -1887,12 +1919,12 @@ async function finishLoad(id, action, btn) {
 
 // Keep the badge (and the open page) fresh
 setInterval(() => {
-  if (!getAdminToken()) return;
+  if (!isStaff()) return;
   const page = document.getElementById('page-load-requests');
   if (page && page.classList.contains('active')) renderLoadRequests();
   else apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending));
 }, 10000);
-setTimeout(() => getAdminToken() && apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending)), 1500);
+setTimeout(() => isStaff() && apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending)), 1500);
 
 // ── CONTACT LINKS (Facebook / Telegram buttons on the website) ──
 function _socialPreview(d) {
@@ -2346,7 +2378,9 @@ async function openAdminChat(username, agent) {
   const av  = avatarColor(username);
   const ac  = agentColor(agent);
   const ini = (username||'?')[0].toUpperCase();
+  document.querySelector('.support-admin-layout').classList.add('has-chat');
   document.getElementById('adminChatHeader').innerHTML = `
+    <button class="sch-back" onclick="closeAdminChat()" aria-label="Back to conversations">‹</button>
     <div class="sch-avatar" style="background:${av}">${ini}</div>
     <div class="sch-info">
       <div class="sch-name">${escAdm(username)}</div>
@@ -2361,6 +2395,11 @@ async function openAdminChat(username, agent) {
   loadConversations();
 }
 
+// Phones: back from a chat to the conversation list
+function closeAdminChat() {
+  document.querySelector('.support-admin-layout').classList.remove('has-chat');
+}
+
 let _lastDateSep = '';
 
 async function loadAdminMessages(full=false) {
@@ -2368,7 +2407,7 @@ async function loadAdminMessages(full=false) {
   try {
     const since = full ? 0 : adminLastId;
     const url = `${API}/support/conversations/${encodeURIComponent(adminCurrentUser)}?agent=${encodeURIComponent(adminCurrentAgent)}&since_id=${since}`;
-    const r    = await fetch(url, { headers: { 'X-Admin-Token': getAdminToken() || '' } });
+    const r    = await fetch(url, { headers: staffHeaders() });
     const data = await r.json();
     const msgs = data.data || [];
     if (!msgs.length) return;
@@ -2425,7 +2464,7 @@ async function adminSendMsg() {
   try {
     await fetch(API + '/support/messages', {
       method: 'POST',
-      headers: {'Content-Type':'application/json', 'X-Admin-Token': getAdminToken() || ''},
+      headers: Object.assign({'Content-Type':'application/json'}, staffHeaders()),
       body: JSON.stringify({ username: adminCurrentUser, agent: adminCurrentAgent, sender: 'agent', message: text })
     });
     await loadAdminMessages();
@@ -2451,9 +2490,63 @@ function startConversationsPolling() {
 
 // ── INIT ──
 function initAdmin() {
-  loadStats();
-  renderRecentTxns();
-  loadAttachedList();
+  const agent = isAgent();
+  const name  = agent ? (_ls.get(SUPPORT_NAME_KEY) || 'Agent') : 'Admin';
+  document.getElementById('whoName').textContent = name;
+  document.getElementById('whoAvatar').textContent = name.slice(0, 1).toUpperCase();
+  document.body.classList.toggle('role-agent', agent);
+  loadConversations();
   startConversationsPolling();
+  if (agent) {
+    showPage('load-requests');
+    // Shows the agent as "online" to players while the panel is open
+    const beat = () => fetch(API + '/worker/heartbeat', { method: 'POST', headers: staffHeaders() }).catch(() => {});
+    beat(); setInterval(beat, 30000);
+  } else {
+    renderDashboard();
+    loadAttachedList();
+  }
 }
+
+// ── DASHBOARD ──
+const dMoney = v => '$' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+async function renderDashboard(btn) {
+  if (btn && btn.animate) btn.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], 500);
+  const res = await apiFetch('/staff/dashboard');
+  if (!res.success) return;
+  const d = res.data;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('dashDate', new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }));
+  set('kWaiting', d.waiting.count); set('kWaitingAmt', d.waiting.count ? dMoney(d.waiting.amount) + ' to load' : 'All done 🎉');
+  document.querySelector('.kpi--alert').classList.toggle('is-hot', d.waiting.count > 0);
+  set('kLoaded', dMoney(d.loaded_today.amount));
+  set('kLoadedN', `${d.loaded_today.count} loads` + (d.rejected_today ? ` · ${d.rejected_today} rejected` : ''));
+  set('kUnread', d.unread_chats); set('kCashouts', `${d.cashouts_today} cashout request${d.cashouts_today === 1 ? '' : 's'} today`);
+  set('kNewPl', d.players.today); set('kPlayers', `${d.players.total} players total`);
+  const weekTotal = d.week.reduce((s, x) => s + x.amount, 0);
+  set('kWeek', dMoney(weekTotal));
+  const max = Math.max(1, ...d.week.map(x => x.amount));
+  document.getElementById('weekChart').innerHTML = d.week.map(x => {
+    const day = new Date(x.day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short' });
+    return `<div class="wk" title="${lrEsc(x.day)}: ${dMoney(x.amount)} (${x.count})">
+      <span class="wk-amt">${x.amount ? '$' + Math.round(x.amount) : ''}</span>
+      <span class="wk-bar" style="height:${Math.max(2, Math.round(x.amount / max * 100))}%"></span>
+      <span class="wk-day">${lrEsc(day)}</span></div>`;
+  }).join('');
+  document.getElementById('topGames').innerHTML = d.top_games.length
+    ? d.top_games.map((g, i) => `<div class="top-row"><span class="top-rank">${i + 1}</span><span class="top-name">${lrEsc(g.game)}</span>
+        <span class="top-n">${g.count}×</span><strong>${dMoney(g.amount)}</strong></div>`).join('')
+    : '<p class="dash-empty">No loads this week yet.</p>';
+  const chip = st => st === 'loaded' ? '<span class="lr-chip" style="background:#dcfce7;color:#166534">Loaded</span>'
+    : st === 'rejected' ? '<span class="lr-chip" style="background:#fee2e2;color:#991b1b">Rejected</span>'
+    : '<span class="lr-chip" style="background:#fef3c7;color:#92400e">Waiting</span>';
+  document.getElementById('dashRecent').innerHTML = d.recent.length
+    ? d.recent.map(r => `<div class="dash-row"><strong class="dash-amt">${dMoney(r.amount)}</strong>
+        <div class="dash-mid"><div>${lrEsc(r.game_name)}</div><div class="lr-sub">${lrEsc(r.username)}</div></div>${chip(r.status)}</div>`).join('')
+    : '<p class="dash-empty">No load requests yet.</p>';
+}
+setInterval(() => {
+  const page = document.getElementById('page-dashboard');
+  if (getAdminToken() && page && page.classList.contains('active') && !document.hidden) renderDashboard();
+}, 30000);
 checkAdminAuth();

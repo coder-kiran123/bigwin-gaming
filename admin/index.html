@@ -79,14 +79,21 @@
   <div class="login-card">
     <div class="login-crown">BW</div>
     <div class="login-title">BigWin Gaming</div>
-    <div class="login-sub">Admin access only</div>
+    <div class="login-sub">Staff sign in</div>
+    <div class="login-mode" role="group" aria-label="Sign in as">
+      <button type="button" data-login="admin" aria-pressed="true" onclick="setLoginMode('admin')">Admin</button>
+      <button type="button" data-login="agent" aria-pressed="false" onclick="setLoginMode('agent')">Support agent</button>
+    </div>
     <form onsubmit="event.preventDefault(); doAdminLogin()">
+      <div class="login-field" id="agentNameField" hidden>
+        <input type="text" id="agentNameInput" placeholder="Agent name (e.g. Brody)" autocomplete="username" autocapitalize="words">
+      </div>
       <div class="login-field">
         <input type="password" id="adminPwInput" placeholder="Admin password"
                autocomplete="current-password" enterkeyhint="go">
         <button type="button" class="login-eye" onclick="toggleLoginEye(this)" tabindex="-1">👁</button>
       </div>
-      <button id="adminLoginBtn" type="submit">Unlock Admin</button>
+      <button id="adminLoginBtn" type="submit">Sign in</button>
     </form>
     <div id="loginErr"></div>
   </div>
@@ -102,137 +109,61 @@
     </div>
   </div>
 
-  <div class="sidebar-search">
-    <div class="search-wrap">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-      </svg>
-      <input type="text" placeholder="Search admin menu...">
-    </div>
-  </div>
 
   <nav>
-    <div class="nav-section">
+    <div class="nav-section" data-admin>
       <div class="nav-label">OVERVIEW</div>
-      <a href="#" class="nav-item active" onclick="showPage('dashboard',this)">
+      <a href="#" class="nav-item" data-page="dashboard" data-admin onclick="showPage('dashboard',this)">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
         Dashboard
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('finance-overview',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 1 0 0 7h5a3.5 3.5 0 1 1 0 7H6"/></svg>
-        Finance Overview
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('growth',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-        Growth Insights
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('ledgers',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        Ledgers
-      </a>
-    </div>
-
-    <div class="nav-section">
-      <div class="nav-label">PLAYERS</div>
-      <a href="#" class="nav-item" onclick="showPage('players',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Players
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('player-analytics',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Player Analytics
-      </a>
-    </div>
-
-    <div class="nav-section">
-      <div class="nav-label">FINANCE</div>
-      <a href="#" class="nav-item" onclick="showPage('transactions',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 1 0 0 7h5a3.5 3.5 0 1 1 0 7H6"/></svg>
-        Transactions
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('deposits',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Deposit Requests
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('withdrawals',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Withdrawal Requests
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('payment-analytics',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-        Payment Analytics
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('provider-balance',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-        Provider Balance
-      </a>
-    </div>
-
-    <div class="nav-section">
-      <div class="nav-label">GAMES</div>
-      <a href="#" class="nav-item" onclick="showPage('game-records',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Game Records
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('game-analytics',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Game Analytics
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('roulette-admin',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-        Roulette Wheel
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('marketplace-admin',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-        Marketplace
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('games-list',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Games
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('backend-attach',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        Backend Attachments
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('provider-balance',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        Game Providers
-      </a>
-    </div>
-
-    <div class="nav-section">
-      <div class="nav-label">GROWTH</div>
-      <a href="#" class="nav-item" onclick="showPage('referrals',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-        Referrals
       </a>
     </div>
 
     <div class="nav-section">
       <div class="nav-label">SUPPORT</div>
-      <a href="#" class="nav-item" onclick="showPage('load-requests',this)">
+      <a href="#" class="nav-item" data-page="load-requests" onclick="showPage('load-requests',this)">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="6"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/></svg>
         Load Requests
-        <span id="lrNavBadge" style="display:none;background:#ef4444;color:#fff;font-size:11px;font-weight:700;border-radius:99px;padding:1px 6px;margin-left:auto"></span>
+        <span id="lrNavBadge" class="nav-badge" style="display:none"></span>
       </a>
-      <a href="#" class="nav-item" onclick="showPage('support-chat',this)" id="navSupportChat">
+      <a href="#" class="nav-item" data-page="support-chat" onclick="showPage('support-chat',this)">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         Live Support
-        <span class="support-unread-dot" id="supportNavBadge" style="display:none;background:#ef4444;color:#fff;font-size:11px;font-weight:700;border-radius:99px;padding:1px 6px;margin-left:auto"></span>
+        <span id="supportNavBadge" class="nav-badge" style="display:none"></span>
       </a>
     </div>
 
-    <div class="nav-section">
+    <div class="nav-section" data-admin>
+      <div class="nav-label">PLAYERS</div>
+      <a href="#" class="nav-item" data-page="players" data-admin onclick="showPage('players',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Players
+      </a>
+      <a href="#" class="nav-item" data-page="transactions" data-admin onclick="showPage('transactions',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 1 0 0 7h5a3.5 3.5 0 1 1 0 7H6"/></svg>
+        Transactions
+      </a>
+    </div>
+
+    <div class="nav-section" data-admin>
+      <div class="nav-label">GAMES</div>
+      <a href="#" class="nav-item" data-page="games-list" data-admin onclick="showPage('games-list',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Games
+      </a>
+      <a href="#" class="nav-item" data-page="backend-attach" data-admin onclick="showPage('backend-attach',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Backends
+      </a>
+    </div>
+
+    <div class="nav-section" data-admin>
       <div class="nav-label">SETUP</div>
-      <a href="#" class="nav-item" onclick="showPage('payment-methods',this)">
+      <a href="#" class="nav-item" data-page="payment-methods" data-admin onclick="showPage('payment-methods',this)">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-        Payment Methods
+        Payments &amp; Settings
       </a>
-      <a href="#" class="nav-item" onclick="showPage('cashout-rules',this)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        Cashout Rules
-      </a>
-      <a href="#" class="nav-item" onclick="showPage('support-agents',this)">
+      <a href="#" class="nav-item" data-page="support-agents" data-admin onclick="showPage('support-agents',this)">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         Support Agents
       </a>
@@ -241,9 +172,9 @@
 
   <div class="sidebar-footer">
     <div class="user-row">
-      <div class="user-avatar">F</div>
+      <div class="user-avatar" id="whoAvatar">A</div>
       <div>
-        <div class="user-name">Admin</div>
+        <div class="user-name" id="whoName">Admin</div>
         <div class="user-email">BigWin Gaming</div>
       </div>
     </div>
@@ -269,13 +200,6 @@
       <h1 id="pageTitle">Dashboard</h1>
     </div>
     <div class="topbar-right">
-      <div class="topbar-search">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        Search admin...
-      </div>
-      <div class="icon-btn" onclick="showNotifs()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        <span class="notif-dot"></span>
       </div>
       <button class="btn-admin-logout" onclick="adminLogout()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -288,246 +212,44 @@
 
     <!-- ═══ DASHBOARD PAGE ═══ -->
     <div id="page-dashboard" class="page active">
-
-      <div class="welcome-row">
-        <div class="welcome-text">
-          <h2>BigWin Gaming</h2>
-          <p>Welcome back</p>
-        </div>
-        <div class="topbar-actions">
-          <button class="btn-icon-action" onclick="refreshDashboard()" title="Refresh">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          </button>
-          <button class="btn-icon-action" title="Settings">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
-        </div>
+      <div class="dash-head">
+        <div><h2>Today</h2><p id="dashDate"></p></div>
+        <button class="btn-icon-action" onclick="renderDashboard(this)" title="Refresh" aria-label="Refresh">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
       </div>
 
-      <!-- STATS -->
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-icon blue">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          </div>
-          <div>
-            <div class="stat-val" id="stat-players">13</div>
-            <div class="stat-lbl">Total Players</div>
-            <div class="stat-sub">↑ today</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon green">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          </div>
-          <div>
-            <div class="stat-val" id="stat-deposits">0</div>
-            <div class="stat-lbl">Pending Deposits</div>
-            <div class="stat-sub" id="stat-dep-sub">all clear</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon orange">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          </div>
-          <div>
-            <div class="stat-val" id="stat-withdrawals">0</div>
-            <div class="stat-lbl">Pending Withdrawals</div>
-            <div class="stat-sub" id="stat-wd-sub">all clear</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon purple">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          </div>
-          <div>
-            <div class="stat-val" id="stat-accounts">10</div>
-            <div class="stat-lbl">Game Accounts</div>
-            <div class="stat-sub">active</div>
-          </div>
-        </div>
+      <div class="dash-kpis">
+        <a href="#" class="kpi kpi--alert" onclick="showPage('load-requests');return false">
+          <span class="kpi-label">Loads waiting</span><span class="kpi-val" id="kWaiting">–</span><span class="kpi-sub" id="kWaitingAmt"></span>
+        </a>
+        <div class="kpi"><span class="kpi-label">Loaded today</span><span class="kpi-val" id="kLoaded">–</span><span class="kpi-sub" id="kLoadedN"></span></div>
+        <a href="#" class="kpi" onclick="showPage('support-chat');return false">
+          <span class="kpi-label">Unread chats</span><span class="kpi-val" id="kUnread">–</span><span class="kpi-sub" id="kCashouts"></span>
+        </a>
+        <a href="#" class="kpi" onclick="showPage('players');return false">
+          <span class="kpi-label">New players today</span><span class="kpi-val" id="kNewPl">–</span><span class="kpi-sub" id="kPlayers"></span>
+        </a>
       </div>
 
-      <!-- FINANCE CMD + GROWTH -->
-      <div class="mid-row">
+      <div class="dash-grid">
         <div class="section-card">
-          <div class="section-header">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b8962e" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            <h3>Finance Command Center</h3>
-          </div>
-          <div class="cmd-grid">
-            <a href="#" class="cmd-card" onclick="showPage('deposits',document.querySelector('[onclick*=deposits]'));return false">
-              <div class="cmd-icon red">💰</div>
-              <div class="cmd-name">Deposits</div>
-              <div class="cmd-sub">Approve reviews</div>
-            </a>
-            <a href="#" class="cmd-card" onclick="showPage('withdrawals',document.querySelector('[onclick*=withdrawals]'));return false">
-              <div class="cmd-icon orange">💸</div>
-              <div class="cmd-name">Cashouts</div>
-              <div class="cmd-sub">Review payouts</div>
-            </a>
-            <a href="#" class="cmd-card" onclick="showPage('payment-methods',document.querySelector('[onclick*=payment-methods]'));return false">
-              <div class="cmd-icon blue">💳</div>
-              <div class="cmd-name">Payments</div>
-              <div class="cmd-sub">Methods &amp; rules</div>
-            </a>
-            <a href="#" class="cmd-card" onclick="showPage('provider-balance',document.querySelector('[onclick*=provider-balance]'));return false">
-              <div class="cmd-icon purple">🎮</div>
-              <div class="cmd-name">Provider Balances</div>
-              <div class="cmd-sub">Check game profit</div>
-            </a>
-            <a href="#" class="cmd-card" onclick="showPage('payment-analytics',document.querySelector('[onclick*=payment-analytics]'));return false">
-              <div class="cmd-icon teal">📊</div>
-              <div class="cmd-name">Payment Analytics</div>
-              <div class="cmd-sub">Money by method</div>
-            </a>
-            <a href="#" class="cmd-card" onclick="showPage('game-analytics',document.querySelector('[onclick*=game-analytics]'));return false">
-              <div class="cmd-icon indigo">🎯</div>
-              <div class="cmd-name">Game Analytics</div>
-              <div class="cmd-sub">Users &amp; balances</div>
-            </a>
-            <a href="#" class="cmd-card" onclick="showPage('transactions',document.querySelector('[onclick*=transactions]'));return false">
-              <div class="cmd-icon green">↔️</div>
-              <div class="cmd-name">Transactions</div>
-              <div class="cmd-sub">Users &amp; balances</div>
-            </a>
-            <a href="#" class="cmd-card">
-              <div class="cmd-icon pink">🛡️</div>
-              <div class="cmd-name">Platform Rules</div>
-              <div class="cmd-sub">Limits &amp; bonuses</div>
-            </a>
-          </div>
+          <div class="section-header"><h3>Loaded — last 7 days</h3><span class="kpi-sub" id="kWeek"></span></div>
+          <div class="week-chart" id="weekChart"></div>
         </div>
-
         <div class="section-card">
-          <div class="section-header">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
-            <h3>Growth Snapshot</h3>
-          </div>
-          <div class="growth-grid">
-            <div class="growth-item">
-              <div class="growth-label">ACTIVE 24H</div>
-              <div class="growth-val" id="g-active">0</div>
-            </div>
-            <div class="growth-item">
-              <div class="growth-label">NEW 24H</div>
-              <div class="growth-val" id="g-new">0</div>
-            </div>
-            <div class="growth-item">
-              <div class="growth-label">PENDING</div>
-              <div class="growth-val" id="g-pending">2</div>
-            </div>
-            <div class="growth-item">
-              <div class="growth-label">ISSUE DETECT</div>
-              <div class="growth-val red" id="g-issues">11</div>
-            </div>
-          </div>
+          <div class="section-header"><h3>Top games this week</h3></div>
+          <div id="topGames"></div>
         </div>
       </div>
 
-      <!-- WALLETS + DEPOSITS + WITHDRAWALS -->
-      <div class="finance-row">
-        <div class="finance-card">
-          <div class="finance-header">
-            <div class="finance-dot dot-purple"></div>
-            <h3>Player Wallets</h3>
-          </div>
-          <div class="finance-row-item">
-            <span class="fin-label">Total Cash</span>
-            <span class="fin-val" id="wallet-cash">—</span>
-          </div>
-          <div class="finance-row-item">
-            <span class="fin-label">BW Credits</span>
-            <span class="fin-val green" id="wallet-fp">—</span>
-          </div>
-          <div class="finance-row-item">
-            <span class="fin-label">Pending</span>
-            <span class="fin-val orange">$0.00</span>
-          </div>
-          <div class="fin-total">
-            <span>Cash + BW</span>
-            <span id="wallet-total">—</span>
-          </div>
+      <div class="section-card">
+        <div class="section-header" style="justify-content:space-between">
+          <h3>Latest load requests</h3>
+          <a href="#" class="btn-view-all" onclick="showPage('load-requests');return false">Open →</a>
         </div>
-
-        <div class="finance-card">
-          <div class="finance-header">
-            <div class="finance-dot dot-green"></div>
-            <h3>Deposits</h3>
-          </div>
-          <div class="dep-stat">
-            <div class="dep-label" style="font-size:11px;color:#6b7280;margin-bottom:4px">TODAY</div>
-            <div class="dep-amount" id="dep-today">—</div>
-          </div>
-          <div class="dep-compare">
-            <div class="dep-compare-item">
-              <label>THIS WEEK</label>
-              <span id="dep-week">—</span>
-            </div>
-            <div class="dep-compare-item">
-              <label>THIS MONTH</label>
-              <span id="dep-month">—</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="finance-card">
-          <div class="finance-header">
-            <div class="finance-dot dot-orange"></div>
-            <h3>Withdrawals</h3>
-          </div>
-          <div class="dep-stat">
-            <div class="dep-label" style="font-size:11px;color:#6b7280;margin-bottom:4px">TODAY</div>
-            <div class="dep-amount" style="color:#f97316" id="wd-today">$0.00</div>
-          </div>
-          <div class="dep-compare">
-            <div class="dep-compare-item">
-              <label>THIS WEEK</label>
-              <span id="wd-week">$0.00</span>
-            </div>
-            <div class="dep-compare-item">
-              <label>THIS MONTH</label>
-              <span id="wd-month">$0.00</span>
-            </div>
-          </div>
-        </div>
+        <div id="dashRecent"></div>
       </div>
-
-      <!-- GAME CREDITS -->
-      <div class="section-card" style="margin-bottom:18px">
-        <div class="section-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c9a74b" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>
-          <h3>Game Credits</h3>
-        </div>
-        <div class="credits-row" style="margin:0">
-          <div class="credit-card">
-            <div class="credit-label">TOP LOADS</div>
-            <div class="credit-val">0</div>
-          </div>
-          <div class="credit-card">
-            <div class="credit-label">TOTAL LOADED</div>
-            <div class="credit-val green">$0.00</div>
-          </div>
-          <div class="credit-card">
-            <div class="credit-label">TOP REDEEM</div>
-            <div class="credit-val">0</div>
-          </div>
-          <div class="credit-card">
-            <div class="credit-label">TOTAL REDEEMED</div>
-            <div class="credit-val green">$0.00</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- RECENT TRANSACTIONS -->
-      <div class="txn-section">
-        <div class="txn-header">
-          <h3>Recent Transactions</h3>
-          <a href="#" class="btn-view-all" onclick="showPage('transactions',document.querySelector('[onclick*=transactions]'));return false">View All →</a>
-        </div>
-        <div id="recentTxnList"></div>
-      </div>
-
     </div><!-- /dashboard -->
 
     <!-- ═══ PROVIDER BALANCE PAGE ═══ -->
@@ -1127,7 +849,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div>
             <h3 style="margin:0">Support Agents</h3>
-            <p style="color:var(--muted);font-size:13px;margin:4px 0 0">Manage agent names, icons, passwords, and access. Share <strong>/support-portal.html</strong> with agents.</p>
+            <p style="color:var(--muted);font-size:13px;margin:4px 0 0">Manage agent names, icons, passwords, and access. Agents sign in at <strong>/admin</strong> → <strong>Support agent</strong> and only see Load Requests and Live Support.</p>
           </div>
           <button onclick="showCreateAgentForm()" style="background:#b8962e;color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer">+ Add Agent</button>
         </div>
@@ -1412,60 +1134,6 @@
   </div><!-- /page-body -->
 </main>
 
-<script>
-/* Inline auth — runs immediately, before the 62KB admin.js loads. */
-(function(){
-  var _api = window.location.hostname === 'localhost' ? 'http://localhost:8000/api' : '/api';
-  var _tk  = 'fp_admin_token';
-
-  // ── Form login ──
-  window.doAdminLogin = async function() {
-    var pw  = (document.getElementById('adminPwInput').value || '').trim();
-    var err = document.getElementById('loginErr');
-    var btn = document.getElementById('adminLoginBtn');
-    err.textContent = '';
-    if (!pw) { err.textContent = 'Enter your admin password'; return; }
-    btn.textContent = 'Verifying…'; btn.disabled = true;
-    try {
-      var r = await fetch(_api + '/admin/login', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({password: pw})
-      });
-      var d = await r.json();
-      if (d.success) {
-        sessionStorage.setItem(_tk, d.token);
-        localStorage.setItem(_tk, d.token);
-        document.getElementById('adminLoginGate').style.display = 'none';
-        if (typeof initAdmin === 'function') initAdmin();
-      } else {
-        err.textContent = d.msg || 'Incorrect password';
-      }
-    } catch(e) {
-      err.textContent = 'Network error — check your connection';
-    }
-    btn.textContent = 'Unlock Admin'; btn.disabled = false;
-  };
-
-  window.toggleLoginEye = function(b) {
-    var inp = document.getElementById('adminPwInput');
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-  };
-
-  window.adminLogout = function() {
-    sessionStorage.removeItem(_tk);
-    localStorage.removeItem(_tk);
-    document.getElementById('adminLoginGate').style.display = '';
-    document.getElementById('adminPwInput').value = '';
-    document.getElementById('loginErr').textContent = '';
-  };
-
-  // ── Auto-restore on refresh: if token exists, hide gate instantly ──
-  var _tok = sessionStorage.getItem(_tk) || localStorage.getItem(_tk);
-  if (_tok) {
-    document.getElementById('adminLoginGate').style.display = 'none';
-  }
-})();
-</script>
-<script src="/admin/admin.js?v=12"></script>
+<script src="/admin/admin.js"></script>
 </body>
 </html>

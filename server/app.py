@@ -3253,8 +3253,10 @@ def support_contact():
 
 
 @app.route('/api/support/conversations', methods=['GET'])
-@require_admin
 def get_support_conversations():
+    # Admin or a logged-in support agent (they answer chats from the admin panel)
+    if not _verify_admin_token(request.headers.get('X-Admin-Token', '')) and not get_support_agent():
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
     db   = get_db()
     rows = db.execute('''
         SELECT s.username, s.agent,
@@ -4785,6 +4787,53 @@ def staff_load_requests():
         r['game_name'] = _gname(r['game'])
         r['method_name'] = names.get(r['method'], r['method'])
     return ok({'requests': out, 'pending': pending})
+
+
+@app.route('/api/staff/dashboard', methods=['GET'])
+@require_admin
+def staff_dashboard():
+    """Admin dashboard: today's loads, waiting work, players and the last 7 days (UTC days)."""
+    now   = datetime.utcnow()
+    today = now.strftime('%Y-%m-%d')
+    week  = (now - timedelta(days=6)).strftime('%Y-%m-%d')
+    db = get_db()
+    try:
+        one = lambda sql, args=(): db.execute(sql, args).fetchone()
+        waiting = one("SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM load_requests WHERE status='pending'")
+        loaded  = one("SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM load_requests "
+                      "WHERE status='loaded' AND handled_at >= ?", (today,))
+        rejected = one("SELECT COUNT(*) AS n FROM load_requests WHERE status='rejected' AND handled_at >= ?", (today,))
+        cashouts = one("SELECT COUNT(*) AS n FROM support_messages WHERE sender='player' AND created_at >= ? "
+                       "AND message LIKE ?", (today, '💸 Cashout request%'))
+        unread  = one("SELECT COUNT(DISTINCT username) AS n FROM support_messages WHERE sender='player' AND is_read=0")
+        players = one("SELECT COUNT(*) AS n FROM players")
+        new_pl  = one("SELECT COUNT(*) AS n FROM players WHERE created_at >= ?", (today,))
+        days = {r['d']: (r['n'], float(r['s'])) for r in db.execute(
+            "SELECT SUBSTR(handled_at,1,10) AS d, COUNT(*) AS n, SUM(amount) AS s FROM load_requests "
+            "WHERE status='loaded' AND handled_at >= ? GROUP BY SUBSTR(handled_at,1,10)", (week,)).fetchall()}
+        top = db.execute("SELECT game, COUNT(*) AS n, SUM(amount) AS s FROM load_requests "
+                         "WHERE status='loaded' AND handled_at >= ? GROUP BY game ORDER BY s DESC LIMIT 5",
+                         (week,)).fetchall()
+        recent = db.execute(f'SELECT {_LR_PUBLIC}, username, handled_by FROM load_requests ORDER BY id DESC LIMIT 8').fetchall()
+    finally:
+        db.close()
+    series = []
+    for i in range(6, -1, -1):
+        d = (now - timedelta(days=i)).strftime('%Y-%m-%d')
+        n, s = days.get(d, (0, 0.0))
+        series.append({'day': d, 'count': n, 'amount': round(s, 2)})
+    rec = rows_to_list(recent)
+    for r in rec:
+        r['game_name'] = _gname(r['game'])
+    return ok({
+        'waiting': {'count': waiting['n'], 'amount': round(float(waiting['s']), 2)},
+        'loaded_today': {'count': loaded['n'], 'amount': round(float(loaded['s']), 2)},
+        'rejected_today': rejected['n'], 'cashouts_today': cashouts['n'], 'unread_chats': unread['n'],
+        'players': {'total': players['n'], 'today': new_pl['n']},
+        'week': series,
+        'top_games': [{'game': _gname(r['game']), 'count': r['n'], 'amount': round(float(r['s']), 2)} for r in top],
+        'recent': rec,
+    })
 
 
 @app.route('/api/staff/load-requests/<int:rid>/<action>', methods=['POST'])
