@@ -5388,6 +5388,158 @@ def staff_reset_player_password(pid):
     return ok(out, msg) if done else (err(msg, 404) if msg == 'Player not found' else err(msg))
 
 
+# ─────────────────────────────────────────
+#  CASHOUTS (staff record each payout by hand) + REPORTS
+# ─────────────────────────────────────────
+def _method_lookup(db, word):
+    """Payment method key from a key or a name ('cashapp', 'Cash App')."""
+    w = re.sub(r'[^a-z0-9]', '', (word or '').lower())
+    for m in db.execute('SELECT key, name FROM payment_methods').fetchall():
+        if w in (re.sub(r'[^a-z0-9]', '', m['key'].lower()), re.sub(r'[^a-z0-9]', '', m['name'].lower())):
+            return m['key']
+    return ''
+
+
+def _record_cashout(player, game, method, amount, score, note, by):
+    """Save a payout staff already sent. Returns (ok, message, row)."""
+    try:
+        amount = round(float(amount or 0), 2)
+        score = round(float(score), 2) if str(score).strip() not in ('', 'None') else amount
+    except (TypeError, ValueError):
+        return False, 'Enter the amount as a number.', None
+    if amount <= 0 or score < 0:
+        return False, 'Enter the amount paid.', None
+    if amount > 100000:
+        return False, 'That amount looks too large.', None
+    game = (game or '').strip().lower()
+    if game and not _GAME_KEY.match(game):
+        return False, 'Pick a game.', None
+    db = get_db()
+    try:
+        method = _method_lookup(db, method) if method else ''
+        if not method:
+            return False, 'Pick the payment method you paid with.', None
+        pid, who = None, (player or '').strip()[:120]
+        if who:
+            prow = db.execute('SELECT id, username FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
+                              (who, who)).fetchone()
+            if prow:
+                pid, who = prow['id'], prow['username']
+        cur = db.execute('INSERT INTO cashouts (player_id, player, game, method, amount, score, note, created_by) '
+                         'VALUES (?,?,?,?,?,?,?,?)', (pid, who, game, method, amount, score, (note or '')[:300], by[:60]))
+        db.commit()
+        row = dict(db.execute('SELECT * FROM cashouts WHERE id=?', (cur.lastrowid,)).fetchone())
+    finally:
+        db.close()
+    return True, f"Recorded {_money(amount)} cashout" + (f" for {who}" if who else ''), row
+
+
+@app.route('/api/staff/cashouts', methods=['GET', 'POST'])
+def staff_cashouts():
+    by = _staff_name()
+    if not by:
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    if request.method == 'POST':
+        d = request.get_json(silent=True) or {}
+        done, msg, row = _record_cashout(d.get('player'), d.get('game'), d.get('method'), d.get('amount'),
+                                         d.get('score', ''), d.get('note'), by)
+        if done and by != 'Admin':
+            _staff_note(f"💸 {_e(by)} recorded a {_money(row['amount'])} cashout"
+                        + (f" for <b>{_e(row['player'])}</b>" if row['player'] else ''))
+        return ok(row, msg) if done else err(msg)
+    db = get_db()
+    try:
+        rows = db.execute('SELECT * FROM cashouts ORDER BY id DESC LIMIT 50').fetchall()
+        names = {m['key']: m['name'] for m in db.execute('SELECT key, name FROM payment_methods').fetchall()}
+        methods = [{'key': m['key'], 'name': m['name']} for m in
+                   db.execute('SELECT key, name FROM payment_methods ORDER BY enabled DESC, sort_order').fetchall()]
+    finally:
+        db.close()
+    out = rows_to_list(rows)
+    for r in out:
+        r['game_name'] = _gname(r['game']) if r['game'] else ''
+        r['method_name'] = names.get(r['method'], r['method'])
+    return ok({'cashouts': out, 'methods': methods,
+               'games': [{'key': k, 'name': v} for k, v in sorted(_GAME_NAMES.items(), key=lambda kv: kv[1])],
+               'can_delete': by == 'Admin'})
+
+
+@app.route('/api/admin/cashouts/<int:cid>', methods=['DELETE'])
+@require_admin
+def admin_delete_cashout(cid):
+    db = get_db()
+    try:
+        cur = db.execute('DELETE FROM cashouts WHERE id=?', (cid,))
+        db.commit()
+    finally:
+        db.close()
+    return ok(msg='Cashout deleted') if cur.rowcount else err('Not found', 404)
+
+
+@app.route('/api/admin/report', methods=['GET'])
+@require_admin
+def admin_report():
+    """Deposits (loads marked Loaded), cashouts (recorded by staff) and score per game for a date range (UTC)."""
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    start = request.args.get('from', today)[:10]
+    end = request.args.get('to', today)[:10]
+    if not (re.match(r'^\d{4}-\d{2}-\d{2}$', start) and re.match(r'^\d{4}-\d{2}-\d{2}$', end)):
+        return err('Use dates like 2026-11-28')
+    if start > end:
+        start, end = end, start
+    lo, hi = start, end + ' 23:59:59'
+    db = get_db()
+    try:
+        names = {m['key']: m['name'] for m in db.execute('SELECT key, name FROM payment_methods').fetchall()}
+        dep_m = db.execute("SELECT method, COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM load_requests "
+                           "WHERE status='loaded' AND handled_at BETWEEN ? AND ? GROUP BY method", (lo, hi)).fetchall()
+        out_m = db.execute("SELECT method, COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM cashouts "
+                           "WHERE created_at BETWEEN ? AND ? GROUP BY method", (lo, hi)).fetchall()
+        dep_g = db.execute("SELECT game, COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM load_requests "
+                           "WHERE status='loaded' AND handled_at BETWEEN ? AND ? GROUP BY game", (lo, hi)).fetchall()
+        out_g = db.execute("SELECT game, COUNT(*) AS n, COALESCE(SUM(score),0) AS s FROM cashouts "
+                           "WHERE created_at BETWEEN ? AND ? GROUP BY game", (lo, hi)).fetchall()
+        dep_d = db.execute("SELECT SUBSTR(handled_at,1,10) AS d, COALESCE(SUM(amount),0) AS s FROM load_requests "
+                           "WHERE status='loaded' AND handled_at BETWEEN ? AND ? GROUP BY SUBSTR(handled_at,1,10)", (lo, hi)).fetchall()
+        out_d = db.execute("SELECT SUBSTR(created_at,1,10) AS d, COALESCE(SUM(amount),0) AS s, COALESCE(SUM(score),0) AS sc "
+                           "FROM cashouts WHERE created_at BETWEEN ? AND ? GROUP BY SUBSTR(created_at,1,10)", (lo, hi)).fetchall()
+    finally:
+        db.close()
+    r2 = lambda v: round(float(v or 0), 2)
+    methods = {}
+    for r in dep_m:
+        methods.setdefault(r['method'], {'deposits': 0, 'deposit_count': 0, 'cashouts': 0, 'cashout_count': 0})
+        methods[r['method']].update(deposits=r2(r['s']), deposit_count=r['n'])
+    for r in out_m:
+        methods.setdefault(r['method'], {'deposits': 0, 'deposit_count': 0, 'cashouts': 0, 'cashout_count': 0})
+        methods[r['method']].update(cashouts=r2(r['s']), cashout_count=r['n'])
+    by_method = sorted(({'method': names.get(k, k or '—'), **v, 'net': r2(v['deposits'] - v['cashouts'])}
+                        for k, v in methods.items()), key=lambda x: -x['deposits'])
+    games = {}
+    for r in dep_g:
+        games.setdefault(r['game'] or '', {'loaded': 0, 'redeemed': 0})['loaded'] = r2(r['s'])
+    for r in out_g:
+        games.setdefault(r['game'] or '', {'loaded': 0, 'redeemed': 0})['redeemed'] = r2(r['s'])
+    by_game = sorted(({'game': _gname(k) if k else 'No game given', **v, 'change': r2(v['loaded'] - v['redeemed'])}
+                      for k, v in games.items()), key=lambda x: -x['loaded'])
+    days = {}
+    for r in dep_d:
+        days.setdefault(r['d'], {'deposits': 0, 'cashouts': 0, 'redeemed': 0})['deposits'] = r2(r['s'])
+    for r in out_d:
+        days.setdefault(r['d'], {'deposits': 0, 'cashouts': 0, 'redeemed': 0}).update(cashouts=r2(r['s']), redeemed=r2(r['sc']))
+    by_day = [{'day': d, **v, 'net': r2(v['deposits'] - v['cashouts'])} for d, v in sorted(days.items(), reverse=True)]
+    t_dep = r2(sum(m['deposits'] for m in by_method))
+    t_out = r2(sum(m['cashouts'] for m in by_method))
+    t_load = r2(sum(g['loaded'] for g in by_game))
+    t_red = r2(sum(g['redeemed'] for g in by_game))
+    return ok({'from': start, 'to': end,
+               'totals': {'deposits': t_dep, 'deposit_count': sum(m['deposit_count'] for m in by_method),
+                          'cashouts': t_out, 'cashout_count': sum(m['cashout_count'] for m in by_method),
+                          'net': r2(t_dep - t_out), 'score_loaded': t_load, 'score_redeemed': t_red,
+                          'score_change': r2(t_load - t_red)},
+               'by_method': by_method, 'by_game': by_game, 'by_day': by_day})
+
+
 @app.route('/api/staff/dashboard', methods=['GET'])
 @require_admin
 def staff_dashboard():
@@ -5543,6 +5695,7 @@ _TG_HELP = ("🤖 <b>BigWin support bot</b>\n"
             "/resetpw <i>email</i> — give a player a new password\n"
             "/link <i>email game username</i> — link an existing game account\n"
             "/unlink <i>email game</i> — remove a wrong link\n"
+            "/cashout <i>amount method game [email]</i> — record a payout you sent\n"
             "<b>Reply</b> to a 💬 player message to answer them in their chat.")
 
 
@@ -5581,6 +5734,22 @@ def _tg_command(token, chat_id, text, actor, reply_to):
         for r in rows:
             _tg_send(token, chat_id, _gl_tg_text(r), _gl_buttons(r['id']) if can_link else None)
         return '' if can_link else 'ℹ️ Only the admin can approve links right now.'
+    if cmd == '/cashout':
+        parts = rest.split()
+        if len(parts) < 3:
+            return ('Usage: /cashout <i>amount method game [email]</i>\n'
+                    'e.g. /cashout 120 cashapp juwa sam@mail.com\n'
+                    'Score redeemed = amount. Different? add <i>score=150</i>')
+        score = ''
+        for p_ in list(parts):
+            if p_.lower().startswith('score='):
+                score = p_.split('=', 1)[1]
+                parts.remove(p_)
+        game = _tg_find_game(parts[2]) if len(parts) > 2 else ''
+        if not game:
+            return f'Unknown game “{_e(parts[2])}”.'
+        done, msg, row = _record_cashout(parts[3] if len(parts) > 3 else '', game, parts[1], parts[0], score, 'via Telegram', by)
+        return ('💸 ' if done else '❌ ') + _e(msg) + (f" · score {row['score']:.2f} · {_e(_gname(game))}" if done else '')
     if cmd == '/unlink':
         if not can_link:
             return 'ℹ️ Only the admin can change links right now.'

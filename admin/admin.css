@@ -1360,3 +1360,20 @@ body.role-agent .tg-card { display: flex; }
 .gid-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .gid-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 99px; background: #f3f4f6; border: 1px solid var(--border); font-size: 13px; }
 .gid-chip button { border: none; background: #fee2e2; color: #991b1b; font-weight: 700; font-size: 12px; border-radius: 99px; padding: 3px 10px; cursor: pointer; }
+
+/* Cashouts + Reports */
+.co-form { grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr 1.2fr auto; }
+.rep-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.rep-periods { display: flex; gap: 8px; }
+.rep-dates { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.rep-dates input { border: 1.5px solid var(--border); border-radius: 10px; padding: 7px 10px; font-size: 14px; background: #fff; color: var(--text); }
+.rep-table { overflow-x: auto; }
+.rep-table table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 480px; }
+.rep-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 8px 10px; border-bottom: 2px solid var(--border); }
+.rep-table td { padding: 10px; border-bottom: 1px solid var(--border); }
+.rep-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.rep-table tfoot td { font-weight: 800; border-bottom: none; border-top: 2px solid var(--border); }
+.rep-table .pos { color: #16a34a; } .rep-table .neg { color: #dc2626; }
+@media (max-width: 1100px) { .co-form { grid-template-columns: 1fr 1fr 1fr; } }
+@media (max-width: 768px) { .co-form { grid-template-columns: 1fr; } .rep-dates { width: 100%; } .rep-dates input { flex: 1; min-width: 0; } }
+.lr-amt { white-space: nowrap; }

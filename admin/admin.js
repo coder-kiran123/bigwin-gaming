@@ -158,6 +158,8 @@ function showPage(pageId, clickedEl) {
     'load-requests':      'Load Requests',
     'game-links':         'Game ID Links',
     'accounts':           'Player Accounts',
+    'cashouts':           'Cashouts',
+    'reports':            'Reports',
     'support-agents':     'Support Agents',
     'referrals':          'Referral Program',
   };
@@ -187,6 +189,8 @@ function showPage(pageId, clickedEl) {
   if (pageId === 'support-chat')        { loadConversations(); }
   if (pageId === 'load-requests')       { renderLoadRequests(); if (isAgent()) renderTelegramCard(); }
   if (pageId === 'game-links')          renderGameLinks();
+  if (pageId === 'cashouts')            renderCashouts();
+  if (pageId === 'reports')             setReportPeriod(repPeriod === 'custom' ? 'custom' : repPeriod);
   if (pageId === 'support-agents')      { renderSupportAgents(); renderAgentsTelegramSwitch(); }
   if (pageId === 'referrals')          { loadReferrals(); }
   if (pageId === 'roulette-admin')     { loadRoulettePrizes(); loadRouletteSpins(); }
@@ -1934,6 +1938,86 @@ async function setAutoLoad(on) {
   renderLoadRequests();
 }
 
+// ── CASHOUTS (recorded by staff after paying) ──
+async function renderCashouts() {
+  const res = await apiFetch('/staff/cashouts');
+  if (!res.success) return;
+  const d = res.data;
+  const g = document.getElementById('coGame'), m = document.getElementById('coMethod');
+  if (!g.options.length) g.innerHTML = '<option value="">Game (optional)</option>' + d.games.map(x => `<option value="${lrEsc(x.key)}">${lrEsc(x.name)}</option>`).join('');
+  if (!m.options.length) m.innerHTML = '<option value="">Paid with…</option>' + d.methods.map(x => `<option value="${lrEsc(x.key)}">${lrEsc(x.name)}</option>`).join('');
+  document.getElementById('coList').innerHTML = d.cashouts.length ? d.cashouts.map(c => {
+    const when = new Date(String(c.created_at).replace(' ', 'T') + 'Z');
+    return `<div class="lr-card"><div class="lr-main">
+        <div class="lr-amt" style="color:#16a34a">−$${Number(c.amount).toFixed(2)}</div>
+        <div style="min-width:0"><div class="lr-line"><strong>${lrEsc(c.player || 'No player given')}</strong>${c.game_name ? ' · ' + lrEsc(c.game_name) : ''}</div>
+          <div class="lr-sub">${lrEsc(c.method_name)} · score ${Number(c.score).toFixed(2)} · by ${lrEsc(c.created_by)} · ${isNaN(when) ? '' : when.toLocaleString()}${c.note ? ' · ' + lrEsc(c.note) : ''}</div></div>
+      </div>${d.can_delete ? `<div class="lr-side"><button class="lr-btn lr-btn--no" onclick="deleteCashout(${c.id})">Delete</button></div>` : ''}</div>`;
+  }).join('') : '<p class="dash-empty">No cashouts recorded yet.</p>';
+}
+async function recordCashout(form) {
+  const out = form.querySelector('.gl-out');
+  const res = await apiFetch('/staff/cashouts', 'POST', {
+    player: form.player.value.trim(), game: form.game.value, method: form.method.value,
+    amount: form.amount.value, score: form.score.value, note: form.note.value.trim() });
+  out.textContent = res.msg || (res.success ? 'Saved' : 'Failed');
+  out.style.color = res.success ? '#16a34a' : '#ef4444';
+  if (res.success) { form.reset(); renderCashouts(); }
+}
+async function deleteCashout(id) {
+  if (!confirm('Delete this cashout record? Reports will change.')) return;
+  const res = await apiFetch('/admin/cashouts/' + id, 'DELETE');
+  if (!res.success) alert(res.msg || 'Failed');
+  renderCashouts();
+}
+
+// ── REPORTS (admin) ──
+let repPeriod = 'today';
+const isoDay = d => d.toISOString().slice(0, 10);
+function setReportPeriod(p) {
+  repPeriod = p;
+  const to = new Date(), from = new Date();
+  if (p === '7') from.setUTCDate(from.getUTCDate() - 6);
+  if (p === '30') from.setUTCDate(from.getUTCDate() - 29);
+  if (p !== 'custom') { document.getElementById('repFrom').value = isoDay(from); document.getElementById('repTo').value = isoDay(to); }
+  document.querySelectorAll('[data-rp]').forEach(b => b.classList.toggle('active', b.dataset.rp === p));
+  renderReport();
+}
+function repTable(cols, rows, foot) {
+  if (!rows.length) return '<p class="dash-empty">Nothing in this period.</p>';
+  const cell = (v, c) => `<td class="${c.num ? 'num' : ''}${c.signed ? (v < 0 ? ' neg' : v > 0 ? ' pos' : '') : ''}">${c.money ? dMoney(v) : c.score ? Number(v).toFixed(2) : lrEsc(v)}</td>`;
+  return `<table><thead><tr>${cols.map(c => `<th class="${c.num ? 'num' : ''}">${c.label}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${cols.map(c => cell(r[c.key], c)).join('')}</tr>`).join('')}</tbody>
+    ${foot ? `<tfoot><tr>${cols.map((c, i) => i === 0 ? '<td>Total</td>' : cell(foot[c.key] ?? '', c)).join('')}</tr></tfoot>` : ''}</table>`;
+}
+async function renderReport() {
+  const from = document.getElementById('repFrom').value, to = document.getElementById('repTo').value;
+  if (!from || !to) return;
+  const res = await apiFetch(`/admin/report?from=${from}&to=${to}`);
+  if (!res.success) return;
+  const d = res.data, t = d.totals;
+  const set = (id, v) => (document.getElementById(id).textContent = v);
+  set('rDep', dMoney(t.deposits)); set('rDepN', `${t.deposit_count} loads`);
+  set('rOut', dMoney(t.cashouts)); set('rOutN', `${t.cashout_count} cashouts`);
+  set('rNet', dMoney(t.net)); document.getElementById('rNet').style.color = t.net < 0 ? '#dc2626' : '#16a34a';
+  set('rScore', (t.score_change > 0 ? '+' : '') + Number(t.score_change).toFixed(2));
+  set('rScoreSub', `${Number(t.score_loaded).toFixed(2)} loaded · ${Number(t.score_redeemed).toFixed(2)} redeemed`);
+  const sum = (rows, k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+  document.getElementById('rMethods').innerHTML = repTable([
+    { key: 'method', label: 'Method' }, { key: 'deposit_count', label: 'Loads', num: 1 },
+    { key: 'deposits', label: 'Deposits', num: 1, money: 1 }, { key: 'cashout_count', label: 'Cashouts', num: 1 },
+    { key: 'cashouts', label: 'Paid out', num: 1, money: 1 }, { key: 'net', label: 'Net', num: 1, money: 1, signed: 1 },
+  ], d.by_method, { deposit_count: t.deposit_count, deposits: t.deposits, cashout_count: t.cashout_count, cashouts: t.cashouts, net: t.net });
+  document.getElementById('rGames').innerHTML = repTable([
+    { key: 'game', label: 'Game' }, { key: 'loaded', label: 'Score loaded', num: 1, score: 1 },
+    { key: 'redeemed', label: 'Score redeemed', num: 1, score: 1 }, { key: 'change', label: 'Change', num: 1, score: 1, signed: 1 },
+  ], d.by_game, { loaded: t.score_loaded, redeemed: t.score_redeemed, change: t.score_change });
+  document.getElementById('rDays').innerHTML = repTable([
+    { key: 'day', label: 'Day' }, { key: 'deposits', label: 'Deposits', num: 1, money: 1 },
+    { key: 'cashouts', label: 'Cashouts', num: 1, money: 1 }, { key: 'net', label: 'Net', num: 1, money: 1, signed: 1 },
+  ], d.by_day, d.by_day.length > 1 ? { deposits: t.deposits, cashouts: t.cashouts, net: t.net } : null);
+}
+
 // ── TELEGRAM for support agents (each agent connects their own Telegram) ──
 async function renderTelegramCard() {
   const card = document.getElementById('tgCard');
@@ -2795,7 +2879,7 @@ function initAdmin() {
 }
 
 // ── DASHBOARD ──
-const dMoney = v => '$' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const dMoney = v => (Number(v) < 0 ? '−$' : '$') + Math.abs(Number(v || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 async function renderDashboard(btn) {
   if (btn && btn.animate) btn.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], 500);
   const res = await apiFetch('/staff/dashboard');
