@@ -79,6 +79,7 @@
           <div class="field"><label for="c-email">Email address <span class="req">*</span></label><input class="input" id="c-email" name="email" type="email" placeholder="name@example.com" autocomplete="email"><span class="error"></span></div>
           <div class="field"><label for="c-msg">Message <span class="req">*</span></label><textarea class="input" id="c-msg" name="message" placeholder="How can we help?"></textarea><span class="error"></span></div>
           <div class="success" id="contact-success" hidden>Thanks! Our team will reply within a few minutes.</div>
+          <div class="alert alert--error" id="contact-fail" role="alert" hidden></div>
           <button class="btn btn--gold btn--block" type="submit">Send message</button>
         </form>
       </div>
@@ -103,7 +104,7 @@
   <script src="assets/js/config.js"></script>
   <script src="assets/js/main.js"></script>
   <script>
-    // Support form validation. TODO: send to your backend or a form service.
+    // Support form → /api/support/contact (ticket in the admin support inbox + Telegram)
     (function () {
       const form = document.getElementById("contact-form");
       const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -122,8 +123,27 @@
           if (msg) ok = false;
         });
         if (!ok) return form.querySelector(".invalid .input").focus();
-        form.reset();
-        document.getElementById("contact-success").hidden = false;
+        const btn = form.querySelector("button[type=submit]");
+        const note = document.getElementById("contact-success");
+        const fail = document.getElementById("contact-fail");
+        note.hidden = fail.hidden = true;
+        btn.disabled = true; btn.textContent = "Sending…";
+        const body = Object.fromEntries(new FormData(form).entries());
+        fetch(((window.SITE && window.SITE.apiBase) || "") + "/api/support/contact", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        })
+          .then((r) => r.json().catch(() => ({ success: false, msg: r.status === 429 ? "Too many messages — please wait a few minutes." : "Server error — please try again." })))
+          .then((j) => {
+            if (!j.success) throw new Error(j.msg || "Couldn't send — please try again.");
+            form.reset();
+            note.textContent = j.msg || "Thanks! We'll reply to your email soon.";
+            note.hidden = false;
+          })
+          .catch((err) => {
+            fail.textContent = err.message && !/fetch/i.test(err.message) ? err.message : "Can't reach the server. Check your connection and try again.";
+            fail.hidden = false;
+          })
+          .finally(() => { btn.disabled = false; btn.textContent = "Send message"; });
       });
     })();
   </script>

@@ -1207,3 +1207,22 @@ body {
 
 /* iOS: prevent auto-zoom on focus (fields must be >= 16px on phones) */
 @media (max-width: 768px) { input, select, textarea, .form-input, .form-select, .support-input, .sidebar-search input { font-size: 16px !important; } }
+
+/* Load Requests */
+.lr-tab { background: none; border: 1.5px solid var(--border); color: var(--muted); border-radius: 99px; padding: 5px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.lr-tab.active { background: #b8962e; border-color: #b8962e; color: #fff; }
+.lr-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 14px 0; border-top: 1px solid var(--border); }
+.lr-main { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; }
+.lr-amt { font-size: 22px; font-weight: 900; color: #b8962e; min-width: 92px; }
+.lr-line { font-size: 14px; }
+.lr-line code { font-size: 13px; }
+.lr-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.lr-side { display: flex; align-items: center; gap: 8px; }
+.lr-shot { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); display: block; }
+.lr-btn { border: none; border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 800; cursor: pointer; }
+.lr-btn--ok { background: #16a34a; color: #fff; }
+.lr-btn--no { background: none; border: 1.5px solid var(--border); color: var(--text); }
+.lr-btn:disabled { opacity: .5; }
+.lr-chip { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 99px; }
+.lr-copy { background: none; border: none; color: #b8962e; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0 2px; }
+@media (max-width: 768px) { .lr-side { width: 100%; } .lr-btn { flex: 1; } }

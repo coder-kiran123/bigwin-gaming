@@ -82,7 +82,7 @@ def send_now(text, token=None, chats=None):
 def set_webhook(token, url, secret):
     """Point the bot at our webhook so replies to support messages reach the site."""
     try:
-        api(token, 'setWebhook', {'url': url, 'secret_token': secret, 'allowed_updates': ['message'],
+        api(token, 'setWebhook', {'url': url, 'secret_token': secret, 'allowed_updates': ['message', 'callback_query'],
                                   'drop_pending_updates': True})
         return True, None
     except Exception as e:

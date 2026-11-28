@@ -84,6 +84,13 @@ window.BW = (function () {
     gameBalance: (game) => request(`/players/${pid()}/game-balance?game=${encodeURIComponent(game)}`, { auth: true }),
     gameToWallet: (game, amount) => request(`/players/${pid()}/game-to-wallet`, { method: "POST", auth: true, body: { game, amount } }),
     withdraw: (amount, method, address) => request("/withdrawals", { method: "POST", auth: true, body: { player_id: pid(), amount, method, address } }),
+    // Manual game loads (support loads by hand, then taps "Loaded")
+    loadRequests: () => request(`/players/${pid()}/load-requests`, { auth: true }),
+    createLoadRequest: (game, amount, method, screenshot) =>
+      request(`/players/${pid()}/load-requests`, { method: "POST", auth: true, body: { game, amount, method, screenshot } }),
+    // Profile photo
+    getAvatar: () => request(`/players/${pid()}/avatar`, { auth: true }),
+    setAvatar: (avatar) => request(`/players/${pid()}/avatar`, { method: "POST", auth: true, body: { avatar } }),
     // Live support chat (one conversation per support agent)
     supportAgents: () => request("/support/agents"),
     supportMessages: (agent, sinceId = 0, preview = false) => {

@@ -210,6 +210,11 @@
 
     <div class="nav-section">
       <div class="nav-label">SUPPORT</div>
+      <a href="#" class="nav-item" onclick="showPage('load-requests',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="6"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/></svg>
+        Load Requests
+        <span id="lrNavBadge" style="display:none;background:#ef4444;color:#fff;font-size:11px;font-weight:700;border-radius:99px;padding:1px 6px;margin-left:auto"></span>
+      </a>
       <a href="#" class="nav-item" onclick="showPage('support-chat',this)" id="navSupportChat">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         Live Support
@@ -1225,6 +1230,22 @@
     </div>
 
     <!-- Support Chat -->
+    <div id="page-load-requests" class="page">
+      <div class="section-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+          <h3 style="margin:0">Load Requests</h3>
+          <div style="display:flex;gap:8px">
+            <button class="lr-tab" data-lr="pending" onclick="setLrFilter('pending')">Waiting</button>
+            <button class="lr-tab" data-lr="all" onclick="setLrFilter('all')">All</button>
+          </div>
+        </div>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+          Players who paid and want a game loaded. Load it in the game's panel, then tap <strong>Loaded</strong> —
+          the player gets a message in their chat. Updates every 10 seconds.</p>
+        <div id="lrList"></div>
+      </div>
+    </div>
+
     <div id="page-support-chat" class="page" style="padding:0">
       <div class="support-admin-layout">
 

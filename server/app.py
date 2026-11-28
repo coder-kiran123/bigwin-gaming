@@ -1797,6 +1797,25 @@ def pay_and_load(pid):
                'load_amount': amount}, 'Payment page ready')
 
 
+@app.route('/api/players/<int:pid>/avatar', methods=['GET', 'POST'])
+@require_player
+def player_avatar(pid):
+    """The player's profile photo (a small data-URI image; the app shrinks it before upload)."""
+    db = get_db()
+    try:
+        if request.method == 'GET':
+            row = db.execute('SELECT avatar FROM players WHERE id=?', (pid,)).fetchone()
+            return ok({'avatar': (row['avatar'] if row else '') or ''})
+        img = str((request.json or {}).get('avatar') or '').strip()
+        if img and (not _IMG_DATA_URI.match(img[:64]) or len(img) > 400_000):
+            return err('Upload a PNG, JPG or WebP image.')
+        db.execute('UPDATE players SET avatar=? WHERE id=?', (img, pid))
+        db.commit()
+        return ok({'avatar': img}, 'Profile photo updated' if img else 'Profile photo removed')
+    finally:
+        db.close()
+
+
 @app.route('/api/players/<int:pid>/wallet', methods=['GET'])
 @require_player
 def player_wallet(pid):
@@ -3202,6 +3221,37 @@ def send_support_message():
     return ok({'id': msg_id}, 'Message sent')
 
 
+_EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]{2,}$')
+
+
+@app.route('/api/support/contact', methods=['POST'])
+@limiter.limit('3 per minute; 10 per hour')
+def support_contact():
+    """Public Support-page form → a ticket in the admin support inbox (thread 'contact:<email>').
+    Kept out of players' own chats so nobody can post into someone else's conversation."""
+    data    = request.json or {}
+    name    = str(data.get('name') or '').strip()[:80]
+    email   = str(data.get('email') or '').strip().lower()[:120]
+    message = str(data.get('message') or '').strip()
+    if not name:
+        return err('Enter your name.')
+    if not _EMAIL_RE.match(email):
+        return err('Enter a valid email address.')
+    if len(message) < 10:
+        return err('Message must be at least 10 characters.')
+    if len(message) > 3000:
+        return err('Message is too long (3000 characters max).')
+    text = (f'📩 Contact form — reply by email\nName: {name}\nEmail: {email}\n\n{message}')
+    db = get_db()
+    try:
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (None, f'contact:{email}', SUPPORT_DEFAULT_AGENT, 'player', text))
+        db.commit()
+    finally:
+        db.close()
+    return ok(msg="Thanks! We'll reply to your email soon.")
+
+
 @app.route('/api/support/conversations', methods=['GET'])
 @require_admin
 def get_support_conversations():
@@ -4451,6 +4501,10 @@ def _tg_build(c):
             'username': req.get('username'), 'agent': req.get('agent') or SUPPORT_DEFAULT_AGENT,
             'player_id': req.get('player_id')}
 
+    if ep == 'support_contact' and ok_:
+        return 'support', (f"📩 <b>Contact form</b> from {_e(req.get('name'))} &lt;{_e(req.get('email'))}&gt;\n"
+                           f"{_e(str(req.get('message') or '')[:3000])}\n\n<i>Reply to them by email.</i>")
+
     if ep == 'toggle_backend' and ok_:
         b = _tg_row('SELECT game, name FROM backends WHERE id=?', (va.get('bid'),))
         on = (data or {}).get('enabled')
@@ -4478,7 +4532,7 @@ _TG_ENDPOINTS = {
     'add_credits', 'worker_game_load', 'withdraw_credits', 'worker_game_redeem', 'admin_credit_player',
     'worker_wallet_load', 'admin_redeem_player', 'worker_wallet_redeem', 'marketplace_approve',
     'marketplace_reject', 'toggle_backend', 'attach_backend', 'attach_loadstar_all', 'delete_backend',
-    'set_loadstar_under', 'send_support_message', 'verify_phone_confirm', 'reset_password_by_email',
+    'set_loadstar_under', 'send_support_message', 'support_contact', 'verify_phone_confirm', 'reset_password_by_email',
     'verify_email_confirm',
 }
 SUPPORT_DEFAULT_AGENT = "BigWin Support"
@@ -4562,6 +4616,189 @@ def admin_telegram_config():
     return ok(msg='Saved — a test message was sent. You can now reply to support messages in Telegram.')
 
 
+# ─────────────────────────────────────────
+#  LOAD REQUESTS (manual loads: player pays → support loads the game by hand → taps Loaded)
+# ─────────────────────────────────────────
+_GAME_KEY = re.compile(r'^[a-z0-9_-]{2,40}$')
+_LR_PUBLIC = 'id, game, game_username, amount, method, status, note, created_at, handled_at'
+
+
+def _lr_tg_text(r, method_name=''):
+    return (f"🎮 <b>Load request #{r['id']}</b>\n"
+            f"Player: <b>{_e(r['username'])}</b>\n"
+            f"Game: <b>{_e(_gname(r['game']))}</b>"
+            + (f" — Game ID <code>{_e(r['game_username'])}</code>" if r.get('game_username') else ' — no Game ID yet') + "\n"
+            f"Amount: <b>{_money(r['amount'])}</b> via {_e(method_name or r['method'])}"
+            + ("\n📎 Receipt attached in Live Support" if r.get('screenshot') else ''))
+
+
+def _lr_buttons(rid):
+    return {'inline_keyboard': [[{'text': '✅ Loaded', 'callback_data': f'lr:{rid}:loaded'},
+                                 {'text': '❌ Reject', 'callback_data': f'lr:{rid}:reject'}]]}
+
+
+def _lr_notify(r, method_name):
+    """Telegram alert with Loaded / Reject buttons (background; never slows the player down)."""
+    def run():
+        try:
+            cfg = _tg.get_config()
+            if not (cfg['token'] and cfg['chats'] and 'money' in cfg['events']):
+                return
+            for chat in cfg['chats']:
+                try:
+                    m = _tg.api(cfg['token'], 'sendMessage', {
+                        'chat_id': chat, 'text': _lr_tg_text(r, method_name), 'parse_mode': 'HTML',
+                        'reply_markup': _lr_buttons(r['id'])})
+                    # Replying to the alert in Telegram also answers the player in their chat
+                    _tg_remember([(str(chat), m['message_id'])],
+                                 {'username': r['username'], 'agent': r['agent'], 'player_id': r['player_id']})
+                except Exception as ex:
+                    print(f'[telegram] load request: {ex}')
+        except Exception as ex:
+            print(f'[telegram] {ex}')
+    _threading.Thread(target=run, daemon=True).start()
+
+
+def _lr_finish(rid, action, by, note=''):
+    """Mark a pending load request loaded/rejected exactly once and tell the player in their chat.
+    Returns (ok, message, row)."""
+    status = 'loaded' if action == 'loaded' else 'rejected'
+    db = get_db()
+    try:
+        cur = db.execute("UPDATE load_requests SET status=?, handled_by=?, note=?, handled_at=? "
+                         "WHERE id=? AND status='pending'",
+                         (status, by[:60], note[:300], datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), rid))
+        row = db.execute('SELECT * FROM load_requests WHERE id=?', (rid,)).fetchone()
+        if not row:
+            return False, 'Load request not found', None
+        r = dict(row)
+        if cur.rowcount == 0:
+            db.commit()
+            return False, f"Already {r['status']} by {r['handled_by'] or 'someone'}", r
+        game = _gname(r['game'])
+        if status == 'loaded':
+            text = (f"✅ Loaded! {_money(r['amount'])} is now in your {game} account"
+                    + (f" ({r['game_username']})" if r['game_username'] else '') + ". Good luck! 🍀")
+            db.execute('INSERT INTO transactions (player_id, username, type, amount, status, method, notes) '
+                       'VALUES (?,?,?,?,?,?,?)',
+                       (r['player_id'], r['username'], 'manual_load', r['amount'], 'approved', r['method'],
+                        f"{game} load #{rid} by {by}"[:300]))
+        else:
+            text = (f"❌ We couldn't complete your {_money(r['amount'])} {game} load."
+                    + (f" {note}" if note else " We couldn't confirm the payment.")
+                    + " Reply here if you need help.")
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (r['player_id'], r['username'], r['agent'] or SUPPORT_DEFAULT_AGENT, 'agent', text))
+        db.commit()
+        return True, ('Marked loaded — the player was told in chat' if status == 'loaded'
+                      else 'Rejected — the player was told in chat'), r
+    finally:
+        db.close()
+
+
+@app.route('/api/players/<int:pid>/load-requests', methods=['GET', 'POST'])
+@require_player
+@limiter.limit('10 per minute; 60 per hour', methods=['POST'])
+def player_load_requests(pid):
+    db = get_db()
+    try:
+        if request.method == 'GET':
+            rows = db.execute(f'SELECT {_LR_PUBLIC} FROM load_requests WHERE player_id=? ORDER BY id DESC LIMIT 30',
+                              (pid,)).fetchall()
+            return ok(rows_to_list(rows))
+
+        data = request.json or {}
+        game = str(data.get('game') or '').strip().lower()
+        method = str(data.get('method') or '').strip()[:40]
+        shot = str(data.get('screenshot') or '').strip()
+        try:
+            amount = round(float(data.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            amount = 0
+        if not _GAME_KEY.match(game):
+            return err('Please choose a game.')
+        if amount < 5:
+            return err('Minimum load is $5.00')
+        if amount > 5000:
+            return err('Maximum load per request is $5,000.00')
+        mrow = db.execute('SELECT name FROM payment_methods WHERE key=? AND enabled=1', (method,)).fetchone()
+        if not mrow:
+            return err('Please choose one of the listed payment methods.')
+        if shot and (not _IMG_DATA_URI.match(shot[:64]) or len(shot) > 4_000_000):
+            return err('Upload a PNG, JPG or WebP image under 3 MB.')
+        if db.execute("SELECT COUNT(*) AS n FROM load_requests WHERE player_id=? AND status='pending'",
+                      (pid,)).fetchone()['n'] >= 5:
+            return err('You already have 5 loads waiting. Please wait for support to finish them.')
+
+        prow = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
+        if not prow:
+            return err('Player not found', 404)
+        garow = db.execute('SELECT game_username FROM game_accounts WHERE player_id=? AND game=?', (pid, game)).fetchone()
+        agent = _get_available_agent(db)
+        cur = db.execute(
+            'INSERT INTO load_requests (player_id, username, game, game_username, amount, method, screenshot, agent) '
+            'VALUES (?,?,?,?,?,?,?,?)',
+            (pid, prow['username'], game, garow['game_username'] if garow else '', amount, method, shot, agent))
+        rid = cur.lastrowid
+        r = dict(db.execute('SELECT * FROM load_requests WHERE id=?', (rid,)).fetchone())
+        # Shows up in the player's chat and in the admin Live Support inbox
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (pid, r['username'], agent, 'player',
+                    f"🎮 Load request #{rid}\nGame: {_gname(game)}"
+                    + (f" ({r['game_username']})" if r['game_username'] else '')
+                    + f"\nAmount: {_money(amount)}\nPaid with: {mrow['name']}"))
+        if shot:
+            db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                       (pid, r['username'], agent, 'player', shot))
+        db.commit()
+        _lr_notify(r, mrow['name'])
+        return ok({k: r[k] for k in ('id', 'game', 'amount', 'method', 'status', 'created_at')},
+                  "Sent! We'll load your game and message you in Chats.")
+    finally:
+        db.close()
+
+
+def _staff_name():
+    """'Admin' or the support agent's name; None when the caller is neither."""
+    if _verify_admin_token(request.headers.get('X-Admin-Token', '')):
+        return 'Admin'
+    return get_support_agent()
+
+
+@app.route('/api/staff/load-requests', methods=['GET'])
+def staff_load_requests():
+    if not _staff_name():
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    status = request.args.get('status', 'pending')
+    db = get_db()
+    try:
+        if status == 'all':
+            rows = db.execute('SELECT * FROM load_requests ORDER BY id DESC LIMIT 100').fetchall()
+        else:
+            rows = db.execute("SELECT * FROM load_requests WHERE status='pending' ORDER BY id ASC LIMIT 100").fetchall()
+        pending = db.execute("SELECT COUNT(*) AS n FROM load_requests WHERE status='pending'").fetchone()['n']
+        names = {m['key']: m['name'] for m in db.execute('SELECT key, name FROM payment_methods').fetchall()}
+    finally:
+        db.close()
+    out = rows_to_list(rows)
+    for r in out:
+        r['game_name'] = _gname(r['game'])
+        r['method_name'] = names.get(r['method'], r['method'])
+    return ok({'requests': out, 'pending': pending})
+
+
+@app.route('/api/staff/load-requests/<int:rid>/<action>', methods=['POST'])
+def staff_finish_load(rid, action):
+    by = _staff_name()
+    if not by:
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    if action not in ('loaded', 'reject'):
+        return err('Unknown action', 404)
+    note = str((request.json or {}).get('note') or '').strip()
+    done, msg, _r = _lr_finish(rid, action, by, note)
+    return ok(msg=msg) if done else err(msg)
+
+
 @app.route('/api/telegram/webhook', methods=['POST'])
 def telegram_webhook():
     """Telegram → us. A reply to a support message becomes an agent reply in that player's chat."""
@@ -4575,7 +4812,34 @@ def telegram_webhook():
         return jsonify({'ok': False}), 403
 
     cfg = _tg.get_config()
-    msg = (request.get_json(silent=True) or {}).get('message') or {}
+    update = request.get_json(silent=True) or {}
+
+    # ✅ Loaded / ❌ Reject buttons on a load-request alert
+    cq = update.get('callback_query')
+    if cq:
+        cmsg = cq.get('message') or {}
+        cchat = str((cmsg.get('chat') or {}).get('id', ''))
+        parts = str(cq.get('data') or '').split(':')
+        reply = 'Not allowed'
+        if cchat in cfg['chats'] and len(parts) == 3 and parts[0] == 'lr' and parts[1].isdigit():
+            by = (cq.get('from') or {}).get('first_name') or 'Telegram'
+            done, reply, r = _lr_finish(int(parts[1]), parts[2], f'{by} (Telegram)')
+            if r:
+                verdict = ('✅ <b>Loaded</b>' if r['status'] == 'loaded' else '❌ <b>Rejected</b>') + \
+                          f" by {_e(r['handled_by'])}"
+                try:
+                    _tg.api(cfg['token'], 'editMessageText', {
+                        'chat_id': cchat, 'message_id': cmsg.get('message_id'), 'parse_mode': 'HTML',
+                        'text': _lr_tg_text(r) + '\n\n' + verdict})
+                except Exception as ex:
+                    print(f'[telegram] edit: {ex}')
+        try:
+            _tg.api(cfg['token'], 'answerCallbackQuery', {'callback_query_id': cq.get('id'), 'text': reply[:190]})
+        except Exception:
+            pass
+        return jsonify({'ok': True})
+
+    msg = update.get('message') or {}
     chat_id = str((msg.get('chat') or {}).get('id', ''))
     if not msg or chat_id not in cfg['chats']:
         return jsonify({'ok': True})  # ignore strangers

@@ -124,6 +124,7 @@ function showPage(pageId, clickedEl) {
     'payment-methods':    'Payment Methods',
     'cashout-rules':      'Cashout Rules',
     'support-chat':       'Live Support',
+    'load-requests':      'Load Requests',
     'referrals':          'Referral Program',
   };
   document.getElementById('pageTitle').textContent = titles[pageId] || pageId;
@@ -148,6 +149,7 @@ function showPage(pageId, clickedEl) {
   if (pageId === 'payment-methods')    { renderPaymentMethods(); renderKeyhubConfig(); renderSmsConfig(); renderTelegramConfig(); renderEmailConfig(); renderSocialLinks(); }
   if (pageId === 'cashout-rules')      renderCashoutRules();
   if (pageId === 'support-chat')        { loadConversations(); }
+  if (pageId === 'load-requests')       renderLoadRequests();
   if (pageId === 'support-agents')      { renderSupportAgents(); }
   if (pageId === 'referrals')          { loadReferrals(); }
   if (pageId === 'roulette-admin')     { loadRoulettePrizes(); loadRouletteSpins(); }
@@ -1813,6 +1815,84 @@ async function disconnectTelegram() {
   _tgMsg(res.success ? '✅ ' + res.msg : (res.msg || 'Failed'), res.success ? '#16a34a' : '#ef4444');
   renderTelegramConfig();
 }
+
+// ── LOAD REQUESTS (player paid → load the game by hand → tap Loaded) ──
+let lrFilter = 'pending';
+const lrEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lrImg = s => /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s || '');
+
+function setLrFilter(f) { lrFilter = f; renderLoadRequests(); }
+
+function lrBadge(n) {
+  const b = document.getElementById('lrNavBadge');
+  if (!b) return;
+  b.textContent = n; b.style.display = n ? '' : 'none';
+}
+
+async function renderLoadRequests() {
+  document.querySelectorAll('.lr-tab').forEach(t => t.classList.toggle('active', t.dataset.lr === lrFilter));
+  const box = document.getElementById('lrList');
+  if (!box) return;
+  const res = await apiFetch('/staff/load-requests?status=' + lrFilter);
+  if (!res.success) { box.innerHTML = `<p style="color:#ef4444">${lrEsc(res.msg || 'Could not load')}</p>`; return; }
+  lrBadge(res.data.pending);
+  const list = res.data.requests;
+  if (!list.length) {
+    box.innerHTML = `<p style="color:var(--muted);padding:24px 0;text-align:center">${lrFilter === 'pending' ? '🎉 No loads waiting.' : 'No load requests yet.'}</p>`;
+    return;
+  }
+  box.innerHTML = list.map(r => {
+    const when = new Date(String(r.created_at).replace(' ', 'T') + (/[zZ+]/.test(r.created_at) ? '' : 'Z'));
+    const done = r.status !== 'pending';
+    const chip = r.status === 'loaded' ? ['#dcfce7', '#166534', 'Loaded']
+               : r.status === 'rejected' ? ['#fee2e2', '#991b1b', 'Rejected'] : ['#fef3c7', '#92400e', 'Waiting'];
+    return `<div class="lr-card">
+      <div class="lr-main">
+        <div class="lr-amt">$${Number(r.amount).toFixed(2)}</div>
+        <div>
+          <div class="lr-line"><strong>${lrEsc(r.game_name)}</strong> ${r.game_username ? `· Game ID <code>${lrEsc(r.game_username)}</code> <button class="lr-copy" data-copy="${lrEsc(r.game_username)}" onclick="navigator.clipboard.writeText(this.dataset.copy)">copy</button>` : '<span style="color:#b45309">· no Game ID yet</span>'}</div>
+          <div class="lr-sub">#${r.id} · ${lrEsc(r.username)} · ${lrEsc(r.method_name)} · ${isNaN(when) ? '' : when.toLocaleString()}</div>
+          ${done ? `<div class="lr-sub">${chip[2]} by ${lrEsc(r.handled_by)}${r.note ? ' — ' + lrEsc(r.note) : ''}</div>` : ''}
+        </div>
+      </div>
+      <div class="lr-side">
+        ${lrImg(r.screenshot) ? `<a href="#" onclick="lrShowShot(${r.id});return false"><img class="lr-shot" src="${r.screenshot}" alt="Receipt"></a>` : ''}
+        ${done ? `<span class="lr-chip" style="background:${chip[0]};color:${chip[1]}">${chip[2]}</span>`
+               : `<button class="lr-btn lr-btn--ok" onclick="finishLoad(${r.id},'loaded',this)">✅ Loaded</button>
+                  <button class="lr-btn lr-btn--no" onclick="finishLoad(${r.id},'reject',this)">Reject</button>`}
+      </div>
+    </div>`;
+  }).join('');
+  window._lrCache = Object.fromEntries(list.map(r => [r.id, r]));
+}
+
+function lrShowShot(id) {
+  const r = (window._lrCache || {})[id];
+  if (!r || !lrImg(r.screenshot)) return;
+  const w = window.open('', '_blank');
+  if (w) { w.document.title = 'Receipt #' + id; const img = w.document.createElement('img'); img.src = r.screenshot; img.style.maxWidth = '100%'; w.document.body.appendChild(img); }
+}
+
+async function finishLoad(id, action, btn) {
+  let note = '';
+  if (action === 'reject') {
+    note = prompt('Reason (the player will see this):', "We couldn't find your payment.");
+    if (note === null) return;
+  }
+  btn.disabled = true;
+  const res = await apiFetch(`/staff/load-requests/${id}/${action}`, 'POST', { note });
+  if (!res.success) alert(res.msg || 'Failed');
+  renderLoadRequests();
+}
+
+// Keep the badge (and the open page) fresh
+setInterval(() => {
+  if (!getAdminToken()) return;
+  const page = document.getElementById('page-load-requests');
+  if (page && page.classList.contains('active')) renderLoadRequests();
+  else apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending));
+}, 10000);
+setTimeout(() => getAdminToken() && apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending)), 1500);
 
 // ── CONTACT LINKS (Facebook / Telegram buttons on the website) ──
 function _socialPreview(d) {

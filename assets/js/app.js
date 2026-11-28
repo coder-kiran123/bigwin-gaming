@@ -47,31 +47,36 @@
     if (welcome) welcome.textContent = `Welcome, ${name}`;
 
     const avatar = $("#profile-avatar");
-    const photo = store.get("bw-photo", null);
+    // Only our own image data or an https photo (Google sign-in) — nothing that could break out of url("")
+    const okSrc = (src) => typeof src === "string" &&
+      /^(data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+|https:\/\/[^\s"'()\\]+)$/.test(src);
     const applyPhoto = (src) => {
-      if (!avatar) return;
+      if (!avatar || !okSrc(src)) return;
       avatar.style.backgroundImage = `url("${src}")`;
       avatar.firstChild.textContent = "";
     };
-    if (photo) applyPhoto(photo);
+    // Cached photo first (instant), then the one saved on the server (same on every device)
+    applyPhoto(store.get("bw-photo", null));
+    BW.getAvatar().then((r) => {
+      const src = r.data && r.data.avatar;
+      if (src) { store.set("bw-photo", src); applyPhoto(src); }
+    }).catch(() => {});
 
     const input = $("#upload-input");
     const btn = $(".upload-btn");
     if (btn && input) {
       btn.addEventListener("click", () => input.click());
-      input.addEventListener("change", () => {
+      input.addEventListener("change", async () => {
         const file = input.files[0];
+        input.value = "";
         if (!file) return;
-        if (!file.type.startsWith("image/")) return toast("Please choose an image file.");
-        if (file.size > 3 * 1024 * 1024) return toast("Image must be under 3 MB.");
-        const reader = new FileReader();
-        reader.onload = () => {
-          // TODO: upload `file` to your server / storage bucket instead of saving locally.
-          store.set("bw-photo", reader.result);
-          applyPhoto(reader.result);
-          toast("Profile image updated.");
-        };
-        reader.readAsDataURL(file);
+        try {
+          const src = await shrinkImage(file, 400);
+          await BW.setAvatar(src);
+          store.set("bw-photo", src);
+          applyPhoto(src);
+          toast("Profile photo updated.");
+        } catch (err) { toast(err.message); }
       });
     }
 
@@ -273,38 +278,26 @@
 
   const gameInfo = (key) => S.games.find((g) => g.key === key) || { key, name: key, image: "" };
 
-  /* ---------- Payments page (wallet: server /api/players/<id>/wallet, /api/deposits, /api/withdrawals) ---------- */
+  /* ---------- Payments page: pick game → amount → method → pay → support loads it by hand ----------
+     Server: /api/players/<id>/load-requests. Support taps "Loaded" (admin or Telegram) and the
+     player gets a message in Chats. */
   const money = (n) => "$" + Number(n || 0).toFixed(2);
-  const TX_LABELS = {
-    deposit: ["Added money", "in"], withdrawal: ["Cashout", "out"], add_credits: ["Loaded game", "out"],
-    withdraw_credits: ["Game → wallet", "in"], tip: ["Tip", "out"], bonus: ["Bonus", "in"],
-    signup_bonus: ["Sign-up bonus", "in"], admin_credit: ["Credit from support", "in"],
-  };
-  const STATUS = { approved: "Completed", completed: "Completed", pending: "Pending", rejected: "Failed", failed: "Failed" };
+  const LR_STATUS = { pending: ["Waiting", "Pending"], loaded: ["Loaded", "Completed"], rejected: ["Rejected", "Failed"] };
 
-  function txRow(t) {
-    const [label, dir] = TX_LABELS[t.type] || [t.type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase()), "in"];
-    const status = STATUS[t.status] || t.status || "";
-    const when = parseTime(t.created_at);
-    const sub = [t.notes || t.method || "", when ? when.toLocaleDateString([], { month: "short", day: "numeric" }) : ""].filter(Boolean).join(" · ");
-    return `<div class="tx">
-      <div class="tx__icon ${dir === "in" ? "tx__icon--in" : "tx__icon--out"}">${dir === "in" ? "↓" : "↑"}</div>
-      <div class="tx__body"><strong>${esc(label)}</strong><small>${esc(sub)}</small></div>
-      <div class="tx__amt">${money(t.amount)}<small class="status--${esc(status)}">${esc(status)}</small></div>
-    </div>`;
-  }
-  function pendingDepRow(d, methodName) {
-    const action = d.payment_url
-      ? `<a class="copy-btn" href="${esc(d.payment_url)}" target="_blank" rel="noopener">Pay</a>`
-      : d.has_screenshot ? "" : `<button class="copy-btn" type="button" data-receipt="${esc(d.id)}">Upload receipt</button>`;
-    return `<div class="tx">
-      <div class="tx__icon tx__icon--in">↓</div>
-      <div class="tx__body"><strong>Add money · ${esc(methodName || d.method)}</strong><small>${d.has_screenshot ? "Receipt sent — waiting for approval" : "Waiting for your payment"}</small></div>
-      <div class="tx__amt">${money(d.amount)}<small class="status--Pending">Pending</small>${action}</div>
+  function loadRow(r) {
+    const g = gameInfo(r.game);
+    const [label, cls] = LR_STATUS[r.status] || [r.status, ""];
+    const when = parseTime(r.created_at);
+    const icon = g.image
+      ? `<div class="tx__icon" style="background:url('../${esc(g.image)}') center/cover"></div>`
+      : `<div class="tx__icon tx__icon--in">${esc(g.name.slice(0, 2).toUpperCase())}</div>`;
+    return `<div class="tx">${icon}
+      <div class="tx__body"><strong>${esc(g.name)}</strong><small>${esc([r.method_name || r.method, when ? when.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""].filter(Boolean).join(" · "))}</small>${r.status === "rejected" && r.note ? `<small class="status--Failed">${esc(r.note)}</small>` : ""}</div>
+      <div class="tx__amt">${money(r.amount)}<small class="status--${cls}">${esc(label)}</small></div>
     </div>`;
   }
 
-  // Phone photos are often 5–10 MB: shrink to a JPEG that fits the server's 3 MB limit
+  // Phone photos are often 5–10 MB: shrink to a JPEG well under the server's 3 MB limit
   function shrinkImage(file, maxSide = 1600) {
     return new Promise((resolve, reject) => {
       if (!file || !file.type.startsWith("image/")) return reject(new Error("Please choose an image file."));
@@ -322,7 +315,6 @@
       img.src = url;
     });
   }
-  const safeUrl = (u) => (/^(https?:\/\/|\/|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(u || "") ? u : "");
 
   async function busyBtn(btn, text, fn) {
     const label = btn.textContent;
@@ -331,224 +323,125 @@
   }
 
   async function initPayments() {
-    let wallet = { balance: 0, transactions: [], pending_deposits: [] };
-    let methods = [], accounts = [], active = [];
-    let payingDep = null;   // deposit waiting for a receipt
+    const form = $("#f-load"), box = $("#pay-box"), done = $("#pay-ok"), history = $("#pay-history");
+    const amountIn = $("#load-amount");
+    let methods = [], accounts = [];
+    let pick = { game: "", method: "" };
 
-    /* --- Tabs --- */
-    const showPane = (name) => {
-      $$(".segmented [data-pane]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.pane === name)));
-      $$(".pane").forEach((p) => (p.hidden = p.dataset.pane !== name));
-      $("#dep-pay").hidden = true;
+    /* --- Game tiles (same games as the home page) --- */
+    $("#pick-game").innerHTML = S.games.map((g) => `
+      <button type="button" class="pick pick--game" role="radio" aria-checked="false" data-game="${esc(g.key)}">
+        ${g.image ? `<img src="../${esc(g.image)}" alt="" loading="lazy">` : `<span class="pick__art">${esc(g.name.slice(0, 2).toUpperCase())}</span>`}
+        <span class="pick__name">${esc(g.name)}</span>
+      </button>`).join("");
+
+    const select = (groupSel, attr, value) => {
+      $$(`${groupSel} [${attr}]`).forEach((b) => b.setAttribute("aria-checked", String(b.getAttribute(attr) === value)));
     };
-    $$(".segmented [data-pane]").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
-
-    /* --- Quick amount chips --- */
-    $$(".amounts[data-for]").forEach((box) => {
-      const input = $("#" + box.dataset.for);
-      box.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-amount]");
-        if (!b) return;
-        input.value = b.dataset.amount === "all" ? Math.floor(wallet.balance) : b.dataset.amount;
-        $$("button", box).forEach((x) => x.classList.toggle("active", x === b));
-      });
-      input.addEventListener("input", () => $$("button", box).forEach((x) => x.classList.remove("active")));
+    $("#pick-game").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-game]");
+      if (!b) return;
+      pick.game = b.dataset.game;
+      select("#pick-game", "data-game", pick.game);
     });
+    $("#pick-method").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-method]");
+      if (!b) return;
+      pick.method = b.dataset.method;
+      select("#pick-method", "data-method", pick.method);
+    });
+
+    /* --- Quick amounts --- */
+    const chips = $(".amounts[data-for]");
+    chips.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-amount]");
+      if (!b) return;
+      amountIn.value = b.dataset.amount;
+      $$("button", chips).forEach((x) => x.classList.toggle("active", x === b));
+    });
+    amountIn.addEventListener("input", () => $$("button", chips).forEach((x) => x.classList.remove("active")));
 
     /* --- Data --- */
-    const history = $("#pay-history");
-    function renderWallet() {
-      $("#wallet-balance").textContent = money(wallet.balance);
-      const bonus = $("#wallet-bonus");
-      bonus.hidden = !(wallet.bonus_credits > 0);
-      bonus.textContent = `+ ${money(wallet.bonus_credits)} bonus credits`;
-      const rows = wallet.pending_deposits.map((d) => pendingDepRow(d, (methods.find((m) => m.key === d.method) || {}).name)).concat(wallet.transactions.map(txRow));
-      history.innerHTML = rows.length ? rows.join("") : '<p class="empty">No transactions yet.</p>';
+    async function loadHistory() {
+      try {
+        const list = (await BW.loadRequests()).data || [];
+        list.forEach((r) => (r.method_name = (methods.find((m) => m.key === r.method) || {}).name));
+        history.innerHTML = list.length ? list.map(loadRow).join("") : '<p class="empty">No loads yet.</p>';
+      } catch (err) { history.innerHTML = `<p class="empty">${esc(err.message)}</p>`; }
     }
-    async function loadWallet() {
-      try { wallet = (await BW.wallet()).data; renderWallet(); }
-      catch (err) { history.innerHTML = `<p class="empty">${esc(err.message)}</p>`; }
-    }
-    function renderSelects() {
-      const opts = methods.length
-        ? '<option value="">Select a method</option>' + methods.map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("")
-        : '<option value="">No payment methods yet — message support</option>';
-      $("#dep-method").innerHTML = opts;
-      $("#wd-method").innerHTML = methods.length
-        ? '<option value="">Select a method</option>' + methods.map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("")
-        : (S.paymentMethods || []).map((m) => `<option>${esc(m)}</option>`).join("");
-      const name = (k) => (gameInfo(k).name);
-      const loadable = accounts.filter((a) => active.includes(a.game));
-      $("#load-game").innerHTML = loadable.length
-        ? '<option value="">Select a game</option>' + loadable.map((a) => `<option value="${esc(a.game)}">${esc(name(a.game))}</option>`).join("")
-        : '<option value="">Get a Game ID first (Game ID tab)</option>';
-      $("#g2w-game").innerHTML = accounts.length
-        ? '<option value="">Select a game</option>' + accounts.map((a) => `<option value="${esc(a.game)}">${esc(name(a.game))}</option>`).join("")
-        : '<option value="">No Game IDs yet</option>';
-    }
-
-    $("#wallet-refresh").addEventListener("click", loadWallet);
     await Promise.all([
-      loadWallet(),
       BW.paymentMethods().then((r) => (methods = r.data || [])).catch(() => {}),
       BW.gameAccounts().then((r) => (accounts = r.data || [])).catch(() => {}),
-      BW.gamesStatus().then((r) => (active = r.data.active || [])).catch(() => {}),
     ]);
-    renderSelects();
-    renderWallet();   // again, now that method names are known
+    $("#pick-method").innerHTML = methods.length
+      ? methods.map((m) => `<button type="button" class="pick pick--method" role="radio" aria-checked="false" data-method="${esc(m.key)}">
+          <span class="pick__icon">${esc(m.icon || "💳")}</span><span class="pick__name">${esc(m.name)}</span></button>`).join("")
+      : '<p class="empty">No payment methods yet — message support in Chats.</p>';
+    if (methods.length === 1) { pick.method = methods[0].key; select("#pick-method", "data-method", pick.method); }
+    loadHistory();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) loadHistory(); });
 
-    /* --- Add money --- */
-    function showPayBox(dep) {
-      payingDep = dep;
-      const m = methods.find((x) => x.key === dep.method) || { name: dep.method };
-      $("#dep-pay-title").textContent = `Send ${money(dep.amount)} with ${m.name}`;
-      $("#dep-pay-sub").textContent = `Request #${dep.id}. Send the exact amount, then upload your receipt.`;
+    // Opened from a game tile elsewhere (?game=juwa) → preselect it
+    const pre = new URLSearchParams(location.search).get("game");
+    if (pre && S.games.some((g) => g.key === pre)) { pick.game = pre; select("#pick-game", "data-game", pre); }
+
+    /* --- Step 4: show how to pay --- */
+    const showStep = (which) => {
+      form.hidden = which !== "form"; box.hidden = which !== "pay"; done.hidden = which !== "done";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const amount = parseFloat(amountIn.value);
+      if (!pick.game) return toast("Choose a game first.");
+      if (!amount || amount < 5) return toast("Minimum amount is $5.");
+      if (!pick.method) return toast("Choose how you'll pay.");
+      const g = gameInfo(pick.game);
+      const m = methods.find((x) => x.key === pick.method) || { name: pick.method };
+      const acc = accounts.find((a) => a.game === pick.game);
+      $("#pay-sum").innerHTML = `<strong>${money(amount)}</strong> → ${esc(g.name)}${acc ? ` <small>(${esc(acc.game_username)})</small>` : ""}
+        <span>Pay with ${esc(m.name)}</span>`;
       const parts = [];
       if (m.address) parts.push(`<div class="cred__row"><span>Send to</span><code>${esc(m.address)}</code><button class="copy-btn" type="button" data-copy="${esc(m.address)}">Copy</button></div>`);
-      const qr = safeUrl(m.qr_image && (m.qr_image.startsWith("data:") || m.qr_image.startsWith("http") || m.qr_image.startsWith("/") ? m.qr_image : "/" + m.qr_image));
-      if (qr) parts.push(`<img class="pay-qr" src="${esc(qr)}" alt="${esc(m.name)} QR code">`);
-      const link = /^https?:\/\//i.test(m.payment_link || "") ? m.payment_link : "";
-      if (link) parts.push(`<a class="btn btn--outline-gold btn--block mt-16" href="${esc(link)}" target="_blank" rel="noopener">Open ${esc(m.name)}</a>`);
+      const qr = m.qr_image ? (/^(data:image\/|https?:\/\/|\/)/i.test(m.qr_image) ? m.qr_image : "/" + m.qr_image) : "";
+      if (qr && /^(data:image\/(png|jpe?g|webp|gif);base64,|https?:\/\/|\/)/i.test(qr)) parts.push(`<img class="pay-qr" src="${esc(qr)}" alt="${esc(m.name)} QR code">`);
+      if (/^https?:\/\//i.test(m.payment_link || "")) parts.push(`<a class="btn btn--outline-gold btn--block mt-16" href="${esc(m.payment_link)}" target="_blank" rel="noopener">Open ${esc(m.name)}</a>`);
       if (m.instructions) parts.push(`<p class="hint mt-16">${esc(m.instructions).replace(/\n/g, "<br>")}</p>`);
-      if (!parts.length) parts.push('<p class="hint">Support will send you the payment details in Chats.</p>');
-      $("#dep-pay-details").innerHTML = parts.join("");
-      $("#dep-shot").value = "";
-      $$(".pane").forEach((p) => (p.hidden = true));
-      $("#dep-pay").hidden = false;
-      $("#dep-pay").scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    $("#f-deposit").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const amount = parseFloat($("#dep-amount").value);
-      const method = $("#dep-method").value;
-      if (!amount || amount < 5) return toast("Minimum amount is $5.");
-      if (!method) return toast("Please choose a payment method.");
-      await busyBtn($("button[type=submit]", e.target), "Creating request…", async () => {
-        try {
-          const r = (await BW.deposit(amount, method)).data;
-          e.target.reset();
-          $$(".amounts button").forEach((x) => x.classList.remove("active"));
-          loadWallet();
-          if (r.payment_url && /^https?:\/\//i.test(r.payment_url)) {
-            toast("Opening the secure payment page…");
-            location.href = r.payment_url;
-          } else {
-            showPayBox({ id: r.request_id, amount, method });
-          }
-        } catch (err) { toast(err.message); }
-      });
+      if (!parts.length) parts.push('<p class="hint">Tap the button below and support will send you the payment details in Chats.</p>');
+      parts.unshift(`<p class="pay-step">Send exactly <strong>${money(amount)}</strong>:</p>`);
+      $("#pay-details").innerHTML = parts.join("");
+      $("#pay-shot").value = "";
+      box.dataset.amount = amount;
+      showStep("pay");
     });
-
-    $("#dep-shot-send").addEventListener("click", async (e) => {
-      const file = $("#dep-shot").files[0];
-      if (!payingDep) return;
-      if (!file) return toast("Choose your payment screenshot first.");
-      await busyBtn(e.currentTarget, "Uploading…", async () => {
-        try {
-          const img = await shrinkImage(file);
-          await BW.depositScreenshot(payingDep.id, img);
-          toast("Receipt sent! We'll add the money once it's checked.");
-          payingDep = null;
-          showPane("deposit");
-          loadWallet();
-        } catch (err) { toast(err.message); }
-      });
-    });
-    $("#dep-pay-later").addEventListener("click", () => {
-      toast("You can upload the receipt later from History.");
-      payingDep = null; showPane("deposit");
-    });
-    history.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-receipt]");
-      if (!b) return;
-      const d = wallet.pending_deposits.find((x) => String(x.id) === b.dataset.receipt);
-      if (d) showPayBox(d);
-    });
-    document.addEventListener("click", async (e) => {
-      const c = e.target.closest("#dep-pay [data-copy]");
+    $("#pay-back").addEventListener("click", () => showStep("form"));
+    box.addEventListener("click", async (e) => {
+      const c = e.target.closest("[data-copy]");
       if (!c) return;
       try { await navigator.clipboard.writeText(c.dataset.copy); toast("Copied."); } catch (err) { toast("Couldn't copy — please copy it manually."); }
     });
 
-    /* --- Load game --- */
-    $("#f-load").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const game = $("#load-game").value;
-      const amount = parseFloat($("#load-amount").value);
-      if (!game) return toast("Please choose a game.");
-      if (!amount || amount <= 0) return toast("Enter an amount.");
-      await busyBtn($("button[type=submit]", e.target), "Loading…", async () => {
+    /* --- "I've paid" → load request --- */
+    $("#pay-done").addEventListener("click", async (e) => {
+      await busyBtn(e.currentTarget, "Sending…", async () => {
         try {
-          const r = await BW.loadGame(game, amount);
-          toast(r.msg || "Game loaded!");
-          e.target.reset();
-          loadWallet();
-        } catch (err) {
-          if (err.data && err.data.insufficient) {
-            toast(`Your wallet is ${money(err.data.shortfall)} short. Add money first.`);
-            showPane("deposit");
-            $("#dep-amount").value = Math.max(5, Math.ceil(err.data.shortfall));
-          } else toast(err.message);
-        }
-      });
-    });
-
-    /* --- Cash out: game → wallet --- */
-    $("#g2w-game").addEventListener("change", async (e) => {
-      const game = e.target.value, out = $("#g2w-bal");
-      out.textContent = "";
-      if (!game) return;
-      out.textContent = "Checking game balance…";
-      try {
-        const r = (await BW.gameBalance(game)).data;
-        if ($("#g2w-game").value !== game) return;
-        out.textContent = `Balance in game: ${money(r.balance)}`;
-        $("#g2w-amount").value = r.balance > 0 ? Number(r.balance).toFixed(2) : "";
-      } catch (err) { out.textContent = err.message; }
-    });
-    $("#f-g2w").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const game = $("#g2w-game").value;
-      const amount = parseFloat($("#g2w-amount").value);
-      if (!game) return toast("Please choose a game.");
-      if (!amount || amount <= 0) return toast("Enter an amount.");
-      await busyBtn($("button[type=submit]", e.target), "Moving…", async () => {
-        try {
-          const r = await BW.gameToWallet(game, amount);
-          toast(r.msg || "Added to your wallet.");
-          e.target.reset(); $("#g2w-bal").textContent = "";
-          await loadWallet();
-          $("#wd-amount").value = Number(wallet.balance).toFixed(2);
+          const file = $("#pay-shot").files[0];
+          const shot = file ? await shrinkImage(file) : "";
+          const amount = parseFloat(box.dataset.amount);
+          const r = await BW.createLoadRequest(pick.game, amount, pick.method, shot);
+          $("#pay-ok-text").textContent = `We'll load ${money(amount)} into ${gameInfo(pick.game).name} and message you in Chats as soon as it's done.`;
+          form.reset();
+          $$("button", chips).forEach((x) => x.classList.remove("active"));
+          showStep("done");
+          loadHistory();
+          if (r.msg) toast(r.msg);
         } catch (err) { toast(err.message); }
       });
     });
-
-    /* --- Cash out: wallet → player --- */
-    $("#f-withdraw").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const amount = parseFloat($("#wd-amount").value);
-      const method = $("#wd-method").value;
-      const address = $("#wd-address").value.trim();
-      if (!amount || amount <= 0) return toast("Enter an amount.");
-      if (amount > wallet.balance + 0.001) return toast(`Your wallet has ${money(wallet.balance)}. Move winnings from a game first.`);
-      if (!method) return toast("Please choose how to receive it.");
-      if (!address) return toast("Enter where we should send it.");
-      await busyBtn($("button[type=submit]", e.target), "Sending request…", async () => {
-        try {
-          const r = await BW.withdraw(amount, method, address);
-          e.target.reset();
-          loadWallet();
-          if (r.data && r.data.payout_url && /^https?:\/\//i.test(r.data.payout_url)) {
-            toast("Cashout ready — opening your payout page…");
-            setTimeout(() => (location.href = r.data.payout_url), 900);
-          } else toast("Cashout requested. We'll message you in Chats when it's sent.");
-        } catch (err) { toast(err.message); }
-      });
+    $("#pay-again").addEventListener("click", () => {
+      pick.game = ""; select("#pick-game", "data-game", "");
+      showStep("form");
     });
-
-    // Back from a card checkout (?paid=…) or a fresh visit: keep history current
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) loadWallet(); });
   }
 
   /* ---------- Game ID page (live: server creates the account on the game's agent portal) ---------- */
