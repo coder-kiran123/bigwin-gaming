@@ -1357,3 +1357,6 @@ body.role-agent .tg-card { display: flex; }
 .tg-hint { flex-basis: 100%; margin-top: 8px; line-height: 1.6; }
 .tg-hint a { color: #b8962e; font-weight: 700; }
 @media (max-width: 768px) { .tg-card .lr-btn { flex-basis: 100%; } }
+.gid-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.gid-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 99px; background: #f3f4f6; border: 1px solid var(--border); font-size: 13px; }
+.gid-chip button { border: none; background: #fee2e2; color: #991b1b; font-weight: 700; font-size: 12px; border-radius: 99px; padding: 3px 10px; cursor: pointer; }

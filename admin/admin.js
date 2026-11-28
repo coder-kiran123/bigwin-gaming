@@ -2107,6 +2107,32 @@ async function renderGameLinks() {
   window._glCache = Object.fromEntries(d.requests.map(r => [r.id, r]));
 }
 
+// Fix a wrong link: search a player, unlink a Game ID
+let _gidTimer = null;
+function searchGameIds(q) { clearTimeout(_gidTimer); _gidTimer = setTimeout(() => renderGameIds(q.trim()), 300); }
+async function renderGameIds(q) {
+  const box = document.getElementById('gidList');
+  if (!box) return;
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  const res = await apiFetch('/staff/game-ids?q=' + encodeURIComponent(q));
+  if (!res.success) { box.innerHTML = `<p style="color:#ef4444">${lrEsc(res.msg || 'Not allowed')}</p>`; return; }
+  box.innerHTML = res.data.length ? res.data.map(p => `
+    <div class="lr-card"><div class="lr-main"><div style="min-width:0">
+      <div class="lr-line"><strong>${lrEsc(p.email || p.username)}</strong>${p.name ? ' · ' + lrEsc(p.name) : ''}</div>
+      <div class="gid-chips">${p.game_ids.length ? p.game_ids.map(g => `
+        <span class="gid-chip">${lrEsc(g.game_name)} <code>${lrEsc(g.game_username)}</code>
+          <button data-pid="${p.id}" data-game="${lrEsc(g.game)}" data-label="${lrEsc(g.game_name + ' ' + g.game_username)}" onclick="unlinkGameId(this)">Unlink</button></span>`).join('')
+        : '<span class="lr-sub">No Game IDs</span>'}</div>
+    </div></div></div>`).join('') : '<p class="dash-empty">No players match.</p>';
+}
+async function unlinkGameId(btn) {
+  if (!confirm(`Unlink ${btn.dataset.label}?\nThe player will be told in their chat. You can link the right username afterwards.`)) return;
+  btn.disabled = true;
+  const res = await apiFetch('/staff/unlink', 'POST', { player: btn.dataset.pid, game: btn.dataset.game });
+  alert(res.msg || (res.success ? 'Unlinked' : 'Failed'));
+  renderGameIds(document.getElementById('gidSearch').value.trim());
+}
+
 function glBadge(n) {
   const b = document.getElementById('glNavBadge');
   if (b) { b.textContent = n; b.style.display = n ? '' : 'none'; }

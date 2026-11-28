@@ -5172,6 +5172,60 @@ def _link_direct(who, game, gu, by):
         db.close()
 
 
+def _unlink(who, game, by):
+    """Remove a player's Game ID for one game (e.g. the wrong username was linked). Returns (ok, message)."""
+    who, game = (who or '').strip(), (game or '').strip().lower()
+    db = get_db()
+    try:
+        if isinstance(who, int) or str(who).isdigit():
+            prow = db.execute('SELECT id, username FROM players WHERE id=?', (int(who),)).fetchone()
+        else:
+            prow = db.execute('SELECT id, username FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
+                              (who, who)).fetchone()
+        if not prow:
+            return False, f'No website account "{who}".'
+        ga = db.execute('SELECT id, game_username FROM game_accounts WHERE player_id=? AND game=?',
+                        (prow['id'], game)).fetchone()
+        if not ga:
+            return False, f"{prow['username']} has no {_gname(game)} Game ID."
+        db.execute('DELETE FROM game_accounts WHERE id=?', (ga['id'],))
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (prow['id'], prow['username'], _get_available_agent(db), 'agent',
+                    f"ℹ️ Your {_gname(game)} account {ga['game_username']} was unlinked from this website account. "
+                    "Message us here if that's not right."))
+        db.commit()
+        _BAL_CACHE.pop((prow['id'], game), None)
+    finally:
+        db.close()
+    if by != 'Admin':
+        _staff_note(f"🔓 {_e(by)} unlinked {_e(_gname(game))} <code>{_e(ga['game_username'])}</code> from <b>{_e(prow['username'])}</b>")
+    return True, f"Unlinked {ga['game_username']} ({_gname(game)}) from {prow['username']} — you can link the right one now."
+
+
+@app.route('/api/staff/game-ids', methods=['GET'])
+def staff_game_ids():
+    """Search players and show their Game IDs (to fix a wrong link)."""
+    if not _can_link():
+        return _deny('Only the admin can change links right now.')
+    q = request.args.get('q', '').strip()
+    if len(q) < 2:
+        return ok([])
+    return ok([{'id': p['id'], 'username': p['username'], 'email': p['email'],
+                'name': ' '.join(x for x in (p['first_name'], p['last_name']) if x),
+                'game_ids': [{'game': g, 'game_name': _gname(g), 'game_username': u} for g, u in p['game_ids'].items()]}
+               for p in _find_players(q, 20)])
+
+
+@app.route('/api/staff/unlink', methods=['POST'])
+def staff_unlink():
+    by = _can_link()
+    if not by:
+        return _deny('Only the admin can change links right now.')
+    data = request.get_json(silent=True) or {}
+    done, msg = _unlink(str(data.get('player') or ''), str(data.get('game') or ''), by)
+    return ok(msg=msg) if done else err(msg)
+
+
 @app.route('/api/staff/link-direct', methods=['POST'])
 def staff_link_direct():
     """Staff link an existing panel username to a website account without a request."""
@@ -5488,6 +5542,7 @@ _TG_HELP = ("🤖 <b>BigWin support bot</b>\n"
             "/newaccount <i>email First Last</i> — create a website account\n"
             "/resetpw <i>email</i> — give a player a new password\n"
             "/link <i>email game username</i> — link an existing game account\n"
+            "/unlink <i>email game</i> — remove a wrong link\n"
             "<b>Reply</b> to a 💬 player message to answer them in their chat.")
 
 
@@ -5526,8 +5581,19 @@ def _tg_command(token, chat_id, text, actor, reply_to):
         for r in rows:
             _tg_send(token, chat_id, _gl_tg_text(r), _gl_buttons(r['id']) if can_link else None)
         return '' if can_link else 'ℹ️ Only the admin can approve links right now.'
+    if cmd == '/unlink':
+        if not can_link:
+            return 'ℹ️ Only the admin can change links right now.'
+        parts = rest.split()
+        if len(parts) < 2:
+            return 'Usage: /unlink <i>email game</i>  (e.g. /unlink sam@mail.com juwa)'
+        game = _tg_find_game(parts[1])
+        if not game:
+            return f'Unknown game “{_e(parts[1])}”.'
+        done, msg = _unlink(parts[0], game, by)
+        return ('✅ ' if done else '❌ ') + _e(msg)
     if cmd == '/find':
-        if not can_players:
+        if not (can_players or can_link):
             return 'ℹ️ Only the admin can look up player accounts right now.'
         if not rest:
             return 'Usage: /find <i>email or name</i>'
@@ -5541,7 +5607,9 @@ def _tg_command(token, chat_id, text, actor, reply_to):
                      f"👤 <b>{_e(pl['email'] or pl['username'])}</b>{' · ' + _e(name) if name else ''}\n"
                      f"Joined {_e((pl['created_at'] or '')[:10])} · {ids}"
                      + ('' if (pl['status'] or 'active') == 'active' else '\n⛔ disabled'),
-                     {'inline_keyboard': [[{'text': '🔑 Reset password', 'callback_data': f"pw:{pl['id']}"}]]})
+                     {'inline_keyboard': ([[{'text': '🔑 Reset password', 'callback_data': f"pw:{pl['id']}"}]] if can_players else [])
+                      + ([[{'text': f'🔓 Unlink {_gname(g)}', 'callback_data': f"ul:{pl['id']}:{g}"}] for g in pl['game_ids']]
+                         if can_link else [])} or None)
         return ''
     if cmd == '/newaccount':
         if not can_players:
@@ -5625,6 +5693,13 @@ def _tg_callback(token, cq, actor):
                 edit(_gl_tg_text(row) + f"\n\n{'✅ <b>Linked</b>' if row['status'] == 'approved' else '❌ <b>Rejected</b>'} by {_e(row['handled_by'])}")
             except Exception as ex:
                 print(f'[telegram] edit: {ex}')
+        return reply
+    if parts[0] == 'ul' and len(parts) == 3 and parts[1].isdigit() and _GAME_KEY.match(parts[2]):
+        if not can_link:
+            return 'Only the admin can change links right now.'
+        done, reply = _unlink(parts[1], parts[2], by)
+        if done:
+            _tg_send(token, chat, '🔓 ' + _e(reply), reply_to=mid)
         return reply
     if parts[0] == 'pw' and len(parts) == 2 and parts[1].isdigit():
         if not can_players:
