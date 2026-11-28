@@ -157,6 +157,7 @@ function showPage(pageId, clickedEl) {
     'support-chat':       'Live Support',
     'load-requests':      'Load Requests',
     'game-links':         'Game ID Links',
+    'accounts':           'Player Accounts',
     'referrals':          'Referral Program',
   };
   document.getElementById('pageTitle').textContent = titles[pageId] || pageId;
@@ -166,7 +167,8 @@ function showPage(pageId, clickedEl) {
 
   if (pageId === 'dashboard')          renderDashboard();
   if (pageId === 'provider-balance')   { renderProviders(); loadServerIP(); }
-  if (pageId === 'players')            renderPlayers();
+  if (pageId === 'players')            { renderPlayers(); renderAgentPlayersSwitch(); }
+  if (pageId === 'accounts')           renderAccounts(document.getElementById('acctSearch').value.trim());
   if (pageId === 'transactions')       renderAllTxns();
   if (pageId === 'deposits')           { renderDeposits(); loadDepositSettings(); }
   if (pageId === 'withdrawals')        renderWithdrawals();
@@ -1931,6 +1933,70 @@ async function setAutoLoad(on) {
   renderLoadRequests();
 }
 
+// ── PLAYER ACCOUNTS for support agents (create account / reset password) ──
+let _acctTimer = null;
+function searchAccounts(q) { clearTimeout(_acctTimer); _acctTimer = setTimeout(() => renderAccounts(q), 300); }
+
+async function renderAccounts(q = '') {
+  const box = document.getElementById('acctList');
+  if (!box) return;
+  const res = await apiFetch('/staff/players' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  if (!res.success) { box.innerHTML = `<p style="color:#ef4444">${lrEsc(res.msg || 'Not allowed')}</p>`; return; }
+  box.innerHTML = res.data.length ? res.data.map(p => `
+    <div class="lr-card">
+      <div class="lr-main"><div style="min-width:0">
+        <div class="lr-line"><strong>${lrEsc([p.first_name, p.last_name].filter(Boolean).join(' ') || p.username)}</strong>
+          ${p.status && p.status !== 'active' ? '<span class="lr-chip" style="background:#fee2e2;color:#991b1b">disabled</span>' : ''}</div>
+        <div class="lr-sub">${lrEsc(p.email || p.username)} · joined ${lrEsc((p.created_at || '').slice(0, 10))}${p.games.length ? ' · ' + p.games.length + ' Game ID' + (p.games.length > 1 ? 's' : '') : ''}</div>
+        <div class="lr-sub gl-out" id="acct-out-${p.id}"></div>
+      </div></div>
+      <div class="lr-side"><button class="lr-btn lr-btn--no" onclick="resetAccount(${p.id}, this)">🔑 Reset password</button></div>
+    </div>`).join('')
+    : `<p class="dash-empty">${q ? 'No players match.' : 'No players yet.'}</p>`;
+}
+
+async function resetAccount(id, btn) {
+  const pw = prompt('New password for this player (leave empty for a random one):', '');
+  if (pw === null) return;
+  btn.disabled = true;
+  const res = await apiFetch(`/staff/players/${id}/reset-password`, 'POST', { new_password: pw.trim() });
+  btn.disabled = false;
+  const out = document.getElementById('acct-out-' + id);
+  if (res.success) {
+    out.innerHTML = `New password: <code>${lrEsc(res.data.password)}</code> <button class="lr-copy" data-copy="${lrEsc(res.data.password)}" onclick="navigator.clipboard.writeText(this.dataset.copy)">copy</button>`;
+    out.style.color = '#16a34a';
+  } else { out.textContent = res.msg || 'Failed'; out.style.color = '#ef4444'; }
+}
+
+async function createAccount(form) {
+  const out = form.querySelector('.gl-out');
+  const res = await apiFetch('/staff/players', 'POST', {
+    email: form.email.value.trim(), first_name: form.first_name.value.trim(),
+    last_name: form.last_name.value.trim(), password: form.password.value.trim() });
+  if (res.success) {
+    out.innerHTML = `Created <strong>${lrEsc(res.data.username)}</strong> — password <code>${lrEsc(res.data.password)}</code>
+      <button type="button" class="lr-copy" data-copy="${lrEsc(res.data.password)}" onclick="navigator.clipboard.writeText(this.dataset.copy)">copy</button>`;
+    out.style.color = '#16a34a';
+    form.reset();
+    renderAccounts(document.getElementById('acctSearch').value.trim());
+  } else { out.textContent = res.msg || 'Failed'; out.style.color = '#ef4444'; }
+}
+
+// Admin switch on the Players page
+async function renderAgentPlayersSwitch() {
+  const res = await apiFetch('/admin/agent-permissions');
+  if (!res.success) return;
+  const on = res.data.manage_players;
+  document.getElementById('agentPlayersToggle').checked = on;
+  const st = document.getElementById('agentPlayersState');
+  st.textContent = on ? 'ON' : 'OFF'; st.classList.toggle('on', on);
+}
+async function setAgentPlayers(on) {
+  const res = await apiFetch('/admin/agent-permissions', 'POST', { manage_players: on });
+  if (!res.success) alert(res.msg || 'Could not save');
+  renderAgentPlayersSwitch();
+}
+
 // ── GAME ID LINKS (existing panel account → website account) ──
 let glFilter = 'pending';
 function setGlFilter(f) { glFilter = f; renderGameLinks(); }
@@ -2629,6 +2695,8 @@ function initAdmin() {
   startConversationsPolling();
   if (agent) {
     showPage('load-requests');
+    // Player Accounts page only when the admin allows it
+    apiFetch('/staff/permissions').then(r => r.success && document.body.classList.toggle('can-players', r.data.manage_players));
     // Shows the agent as "online" to players while the panel is open
     const beat = () => fetch(API + '/worker/heartbeat', { method: 'POST', headers: staffHeaders() }).catch(() => {});
     beat(); setInterval(beat, 30000);

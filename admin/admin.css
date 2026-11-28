@@ -1341,3 +1341,11 @@ a.kpi:hover { box-shadow: 0 4px 16px rgba(0,0,0,.06); transform: translateY(-1px
 .gl-form .gl-out { grid-column: 1 / -1; }
 #page-game-links .auto-switch { margin-bottom: 8px; }
 @media (max-width: 768px) { .gl-form { grid-template-columns: 1fr; } .gl-actions .lr-btn { flex: 1; } }
+
+/* Player Accounts (support agents) */
+.agent-only { display: none !important; }
+body.role-agent.can-players .agent-only { display: flex !important; }
+.acct-form { grid-template-columns: 1.4fr 1fr 1fr 1.2fr auto; }
+.acct-search { width: 100%; box-sizing: border-box; border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px; margin-bottom: 6px; background: #fff; color: var(--text); }
+#page-players > .auto-switch { margin-bottom: 14px; background: #fff; }
+@media (max-width: 768px) { .acct-form { grid-template-columns: 1fr; } }

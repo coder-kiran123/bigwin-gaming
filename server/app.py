@@ -2873,6 +2873,9 @@ def worker_toggle_player_status(pid):
 def worker_reset_password(pid):
     agent, resp, code = _require_worker()
     if resp: return resp, code
+    # Same admin switch as the panel's Players page
+    if not _can_manage_players():
+        return _deny('Only the admin can reset passwords right now.')
     return admin_reset_password(pid)
 
 @app.route('/api/worker/conversations', methods=['GET'])
@@ -5043,7 +5046,7 @@ def staff_link_check():
 def staff_finish_link(rid, action):
     by = _can_link()
     if not by:
-        return jsonify({'success': False, 'msg': 'Only the admin can link accounts right now.'}), 401
+        return _deny('Only the admin can link accounts right now.')
     if action not in ('approve', 'reject'):
         return err('Unknown action', 404)
     note = str((request.get_json(silent=True) or {}).get('note') or '').strip()[:300]
@@ -5090,7 +5093,7 @@ def staff_link_direct():
     """Staff link an existing panel username to a website account without a request."""
     by = _can_link()
     if not by:
-        return jsonify({'success': False, 'msg': 'Only the admin can link accounts right now.'}), 401
+        return _deny('Only the admin can link accounts right now.')
     data = request.get_json(silent=True) or {}
     who  = str(data.get('player') or '').strip()
     game = str(data.get('game') or '').strip().lower()
@@ -5124,6 +5127,137 @@ def staff_link_direct():
         return ok(msg=f"Linked {gu} ({_gname(game)}) to {prow['username']}" + ('' if checked else ' — not checked on a panel'))
     finally:
         db.close()
+
+
+# ─────────────────────────────────────────
+#  PLAYER ACCOUNTS FOR STAFF (create account / reset password)
+#  Admin always; support agents only while the admin allows it.
+# ─────────────────────────────────────────
+def _deny(msg):
+    """Signed-in staff without permission get 403 (the panel keeps them logged in); strangers get 401."""
+    return jsonify({'success': False, 'msg': msg}), (403 if _staff_name() else 401)
+
+
+def _can_manage_players():
+    if _verify_admin_token(request.headers.get('X-Admin-Token', '')):
+        return 'Admin'
+    agent = get_support_agent()
+    if not agent:
+        return None
+    db = get_db()
+    try:
+        return agent if _setting_on(db, 'agents_manage_players', True) else None
+    finally:
+        db.close()
+
+
+def _staff_note(text):
+    """Telegram note to the admin when an agent touches player accounts."""
+    try:
+        _tg.notify('admin', text)
+    except Exception:
+        pass
+
+
+def _temp_password():
+    alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'   # no look-alikes (l/1, o/0)
+    return ''.join(_secrets.choice(alphabet) for _ in range(8))
+
+
+@app.route('/api/staff/permissions', methods=['GET'])
+def staff_permissions():
+    """What the signed-in staff member may do (the admin panel shows/hides pages with this)."""
+    if not _staff_name():
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    return ok({'manage_players': bool(_can_manage_players()), 'link_accounts': bool(_can_link())})
+
+
+@app.route('/api/admin/agent-permissions', methods=['GET', 'POST'])
+@require_admin
+def admin_agent_permissions():
+    db = get_db()
+    try:
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            if 'manage_players' in data:
+                _upsert_setting(db, 'agents_manage_players', '1' if data['manage_players'] else '0')
+        return ok({'manage_players': _setting_on(db, 'agents_manage_players', True)})
+    finally:
+        db.close()
+
+
+@app.route('/api/staff/players', methods=['GET', 'POST'])
+def staff_players():
+    by = _can_manage_players()
+    if not by:
+        return _deny('Only the admin can manage player accounts right now.')
+    db = get_db()
+    try:
+        if request.method == 'GET':
+            q = request.args.get('q', '').strip().lower()[:80]
+            if q:
+                like = f'%{q}%'
+                rows = db.execute(
+                    "SELECT id, username, email, first_name, last_name, status, created_at FROM players "
+                    "WHERE LOWER(username) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? "
+                    "OR LOWER(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) LIKE ? "
+                    "ORDER BY id DESC LIMIT 50", (like, like, like)).fetchall()
+            else:
+                rows = db.execute("SELECT id, username, email, first_name, last_name, status, created_at FROM players "
+                                  "ORDER BY id DESC LIMIT 50").fetchall()
+            out = rows_to_list(rows)
+            for p in out:
+                p['games'] = [g['game'] for g in db.execute('SELECT game FROM game_accounts WHERE player_id=?',
+                                                             (p['id'],)).fetchall()]
+            return ok(out)
+
+        # Create a website account (same rules as signing up on the site)
+        data  = request.get_json(silent=True) or {}
+        email = str(data.get('email') or '').strip().lower()
+        first = str(data.get('first_name') or '').strip()[:60]
+        last  = str(data.get('last_name') or '').strip()[:60]
+        pw    = str(data.get('password') or '').strip() or _temp_password()
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+            return err('Enter a valid email address.')
+        if len(pw) < 6:
+            return err('Password must be at least 6 characters.')
+        if db.execute('SELECT 1 FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
+                      (email, email)).fetchone():
+            return err('That email already has an account — use Reset password instead.')
+        cur = db.execute(
+            'INSERT INTO players (username, email, password_hash, fp_credits, referral_code, first_name, last_name, '
+            'referred_by_name) VALUES (?,?,?,?,?,?,?,?)',
+            (email, email, hash_password(pw), 0, _gen_referral_code(db), first, last, f'Created by {by}'))
+        db.commit()
+        pid = cur.lastrowid
+    finally:
+        db.close()
+    if by != 'Admin':
+        _staff_note(f'👤 {_e(by)} created website account <b>{_e(email)}</b>')
+    return ok({'id': pid, 'username': email, 'password': pw},
+              f'Account created — give the player their email and password: {pw}')
+
+
+@app.route('/api/staff/players/<int:pid>/reset-password', methods=['POST'])
+def staff_reset_player_password(pid):
+    by = _can_manage_players()
+    if not by:
+        return _deny('Only the admin can reset passwords right now.')
+    pw = str((request.get_json(silent=True) or {}).get('new_password') or '').strip() or _temp_password()
+    if len(pw) < 6:
+        return err('Password must be at least 6 characters.')
+    db = get_db()
+    try:
+        row = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
+        if not row:
+            return err('Player not found', 404)
+        db.execute('UPDATE players SET password_hash=? WHERE id=?', (hash_password(pw), pid))
+        db.commit()
+    finally:
+        db.close()
+    if by != 'Admin':
+        _staff_note(f'🔑 {_e(by)} reset the password for <b>{_e(row["username"])}</b>')
+    return ok({'password': pw}, f'New password for {row["username"]}: {pw}')
 
 
 @app.route('/api/staff/dashboard', methods=['GET'])

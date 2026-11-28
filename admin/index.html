@@ -136,6 +136,10 @@
         Game ID Links
         <span id="glNavBadge" class="nav-badge" style="display:none"></span>
       </a>
+      <a href="#" class="nav-item agent-only" data-page="accounts" onclick="showPage('accounts',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+        Player Accounts
+      </a>
     </div>
 
     <div class="nav-section" data-admin>
@@ -307,6 +311,11 @@
 
     <!-- ═══ PLAYERS PAGE ═══ -->
     <div id="page-players" class="page">
+      <div class="auto-switch">
+        <label class="switch"><input type="checkbox" id="agentPlayersToggle" onchange="setAgentPlayers(this.checked)"><span></span></label>
+        <div><strong>Support agents can create accounts &amp; reset passwords</strong> <span class="auto-state" id="agentPlayersState">ON</span>
+          <div class="lr-sub">Agents get a "Player Accounts" page. You get a Telegram note each time they create an account or reset a password.</div></div>
+      </div>
       <div class="section-card">
         <div class="section-header"><h3>All Players</h3></div>
         <div id="playersTable" style="overflow-x:auto"></div>
@@ -978,6 +987,27 @@
           </div>
         </div>
         <div id="lrList"></div>
+      </div>
+    </div>
+
+    <div id="page-accounts" class="page">
+      <div class="section-card">
+        <div class="section-header"><h3>Player Accounts</h3></div>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Create a website account for a player, or give them a new password if they're locked out.
+          Leave the password empty to get a random one. Tell the player their new login in chat.</p>
+        <details class="gl-direct" id="acctCreate">
+          <summary>➕ Create account</summary>
+          <form onsubmit="event.preventDefault(); createAccount(this)" class="gl-form acct-form">
+            <input name="email" type="email" placeholder="Player email" autocomplete="off" required>
+            <input name="first_name" placeholder="First name" autocomplete="off">
+            <input name="last_name" placeholder="Last name" autocomplete="off">
+            <input name="password" placeholder="Password (empty = random)" autocomplete="new-password">
+            <div class="gl-actions"><button type="submit" class="lr-btn lr-btn--ok">Create</button></div>
+            <div class="lr-sub gl-out"></div>
+          </form>
+        </details>
+        <input id="acctSearch" class="acct-search" placeholder="Search by email, username or name…" oninput="searchAccounts(this.value)" autocomplete="off">
+        <div id="acctList"></div>
       </div>
     </div>
 
