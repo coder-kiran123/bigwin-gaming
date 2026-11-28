@@ -56,6 +56,7 @@ window.BW = (function () {
     if (!json.success) {
       const e = new Error(json.msg || "Something went wrong. Please try again.");
       e.code = json.code;
+      e.data = json.data;
       throw e;
     }
     return json;
@@ -74,6 +75,15 @@ window.BW = (function () {
     gameAccounts: () => request(`/players/${pid()}/game-accounts`, { auth: true }),
     gameLogin: (game) => request(`/players/${pid()}/game-login?game=${encodeURIComponent(game)}`, { auth: true }),
     createGameAccount: (game) => request(`/players/${pid()}/create-game-account`, { method: "POST", body: { game }, auth: true }),
+    // Wallet & payments
+    wallet: () => request(`/players/${pid()}/wallet`, { auth: true }),
+    paymentMethods: () => request("/payment-methods"),
+    deposit: (amount, method) => request("/deposits", { method: "POST", auth: true, body: { player_id: pid(), amount, method } }),
+    depositScreenshot: (id, screenshot) => request(`/deposits/${id}/screenshot`, { method: "POST", auth: true, body: { screenshot } }),
+    loadGame: (game, amount) => request(`/players/${pid()}/load-credits`, { method: "POST", auth: true, body: { game, amount } }),
+    gameBalance: (game) => request(`/players/${pid()}/game-balance?game=${encodeURIComponent(game)}`, { auth: true }),
+    gameToWallet: (game, amount) => request(`/players/${pid()}/game-to-wallet`, { method: "POST", auth: true, body: { game, amount } }),
+    withdraw: (amount, method, address) => request("/withdrawals", { method: "POST", auth: true, body: { player_id: pid(), amount, method, address } }),
     // Live support chat (one conversation per support agent)
     supportAgents: () => request("/support/agents"),
     supportMessages: (agent, sinceId = 0, preview = false) => {

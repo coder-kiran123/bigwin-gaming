@@ -143,3 +143,19 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 
 .channels::-webkit-scrollbar { display: none; }
 @media (hover: none) { .chat-row:hover { background: none; } .chat-row--pinned:hover { background: var(--gold-tint); } .chat-row:active { background: var(--bg-elev); } }
+
+/* Payments: wallet card, 3-way tabs, pay instructions ------------------- */
+.wallet { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: radial-gradient(ellipse at 0% 0%, rgba(201, 167, 75, 0.16), transparent 70%); }
+.wallet__label { color: var(--text-muted); font-size: 0.85rem; letter-spacing: 1px; text-transform: uppercase; }
+.wallet__amt { font-size: 2.2rem; font-weight: 900; color: var(--gold); line-height: 1.15; }
+.wallet__sub { color: var(--online); font-size: 0.85rem; font-weight: 600; }
+.wallet__sub[hidden] { display: none; }
+.segmented--3 { grid-template-columns: repeat(3, 1fr); }
+.segmented--3 button { font-size: 0.9rem; padding: 0 4px; }
+.pane[hidden], .pay-box[hidden] { display: none; }
+.pane__title { font-size: 1rem; }
+.pay-box h3 { font-size: 1.1rem; margin-bottom: 4px; }
+.pay-box .cred__row { background: var(--surface); }
+.pay-qr { width: 200px; max-width: 70%; margin: 16px auto 0; border-radius: var(--radius-sm); background: #fff; padding: 8px; }
+.input--file { height: auto; padding: 10px; }
+.tx__amt .copy-btn { display: block; margin: 4px -10px -8px auto; }

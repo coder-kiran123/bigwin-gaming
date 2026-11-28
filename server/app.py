@@ -266,6 +266,11 @@ def _serve(directory, filename, cache_seconds=0):
 _STATIC_EXT = {'.js', '.css', '.webp', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico', '.woff', '.woff2'}
 
 # ── Serve frontend files (HTML/CSS/JS/images) ────────────────────────────
+# Biggest legitimate body is a ~3 MB screenshot as base64; refuse anything far larger
+app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024
+_IMG_DATA_URI = re.compile(r'^data:image/(png|jpe?g|webp|gif);base64,')
+
+
 @app.route('/')
 def root():
     return _serve(WEB_DIR, 'index.html')
@@ -1792,6 +1797,29 @@ def pay_and_load(pid):
                'load_amount': amount}, 'Payment page ready')
 
 
+@app.route('/api/players/<int:pid>/wallet', methods=['GET'])
+@require_player
+def player_wallet(pid):
+    """Payments page: wallet balance, recent history and deposits still waiting for approval."""
+    db = get_db()
+    try:
+        prow = db.execute('SELECT balance, fp_credits FROM players WHERE id=?', (pid,)).fetchone()
+        if not prow:
+            return err('Player not found', 404)
+        txns = db.execute(
+            'SELECT id, type, amount, method, status, notes, created_at FROM transactions '
+            'WHERE player_id=? ORDER BY id DESC LIMIT 40', (pid,)).fetchall()
+        deps = db.execute(
+            "SELECT id, amount, method, payment_url, created_at, "
+            "CASE WHEN screenshot IS NOT NULL AND screenshot<>'' THEN 1 ELSE 0 END AS has_screenshot "
+            "FROM deposit_requests WHERE player_id=? AND status='pending' ORDER BY id DESC LIMIT 10", (pid,)).fetchall()
+        return ok({'balance': round(float(prow['balance'] or 0), 2),
+                   'bonus_credits': round(float(prow['fp_credits'] or 0), 2),
+                   'transactions': rows_to_list(txns), 'pending_deposits': rows_to_list(deps)})
+    finally:
+        db.close()
+
+
 @app.route('/api/players/<int:pid>/pending-loads', methods=['GET'])
 @require_player
 def pending_loads(pid):
@@ -2004,17 +2032,31 @@ def create_deposit():
     player_token = request.headers.get('X-Player-Token', '')
     data     = request.json or {}
     pid      = data.get('player_id')
-    username = data.get('username', '')
-    amount   = data.get('amount', 0)
-    method   = data.get('method', 'cashapp')
+    method   = str(data.get('method', 'cashapp') or 'cashapp')[:40]
+    try:
+        amount = round(float(data.get('amount', 0) or 0), 2)
+    except (TypeError, ValueError):
+        amount = 0
 
     if not _verify_admin_token(admin_token) and not _verify_player_token(player_token, pid):
         return jsonify({'success': False, 'msg': 'Authentication required'}), 401
 
-    if not amount or float(amount) <= 0:
+    if amount <= 0:
         return err('Invalid amount')
+    if amount > 10000:
+        return err('Maximum deposit per request is $10,000.00')
 
     db = get_db()
+    # Never trust a username from the browser — it decides whose bonus and chat this deposit touches
+    prow = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
+    if not prow:
+        db.close()
+        return err('Player not found', 404)
+    username = prow['username']
+    if not _get_keyhub_key() and not db.execute(
+            'SELECT 1 FROM payment_methods WHERE key=? AND enabled=1', (method,)).fetchone():
+        db.close()
+        return err('Pick one of the listed payment methods.')
 
     # Insert first to get dep_id for the signed return URL
     cursor = db.execute(
@@ -2057,6 +2099,8 @@ def deposit_screenshot(rid):
     screenshot = (data.get('screenshot') or '').strip()   # base64 data-URI
     if not screenshot:
         return err('No screenshot provided')
+    if not _IMG_DATA_URI.match(screenshot[:64]) or len(screenshot) > 4_000_000:
+        return err('Upload a PNG, JPG or WebP image under 3 MB.')
 
     db  = get_db()
     row = db.execute('SELECT * FROM deposit_requests WHERE id=?', (rid,)).fetchone()
@@ -2071,6 +2115,9 @@ def deposit_screenshot(rid):
     if not _verify_admin_token(admin_token) and not _verify_player_token(player_token, d['player_id']):
         db.close()
         return jsonify({'success': False, 'msg': 'Authentication required'}), 401
+    if d['status'] != 'pending':
+        db.close()
+        return err('This deposit is already ' + d['status'] + '.')
     db.execute('UPDATE deposit_requests SET screenshot=? WHERE id=?', (screenshot, rid))
 
     # Auto-create support ticket so admin is notified
@@ -2238,14 +2285,20 @@ def get_withdrawals():
 def create_withdrawal():
     data    = request.json or {}
     pid     = data.get('player_id')
-    amount  = float(data.get('amount', 0))
+    try:
+        amount     = round(float(data.get('amount', 0) or 0), 2)
+        tip_amount = round(float(data.get('tip_amount', 0) or 0), 2)
+    except (TypeError, ValueError):
+        return err('Invalid amount')
+    if tip_amount < 0:
+        return err('Invalid tip')
     # Require either admin token or player's own token
     admin_token  = request.headers.get('X-Admin-Token', '')
     player_token = request.headers.get('X-Player-Token', '')
     if not _verify_admin_token(admin_token) and not _verify_player_token(player_token, pid):
         return jsonify({'success': False, 'msg': 'Authentication required'}), 401
-    method  = data.get('method', '')
-    address = data.get('address', '')
+    method  = str(data.get('method', '') or '')[:40]
+    address = str(data.get('address', '') or '').strip()[:200]
 
     if amount <= 0:    return err('Invalid amount')
     if not method:     method = 'cashapp'
@@ -2295,7 +2348,7 @@ def create_withdrawal():
 
         wager_row = db.execute(
             "SELECT COALESCE(SUM(amount),0) AS total FROM transactions "
-            "WHERE player_id=? AND type='load_credits'",
+            "WHERE player_id=? AND type IN ('add_credits','load_credits')",
             (pid,)
         ).fetchone()
         total_wagered = float(wager_row['total']) if wager_row else 0.0
@@ -2307,25 +2360,28 @@ def create_withdrawal():
             return err(f'Wagering requirement not met. You need to play ${still_needed:.2f} '
                        f'more before cashing out (${wager_mult:.0f}× requirement).')
 
-    tip_amount = float(data.get('tip_amount', 0) or 0)
-    tip_agent  = (data.get('tip_agent') or '').strip()
+    tip_agent  = (data.get('tip_agent') or '').strip()[:60]
 
-    # ── Balance check (include tip) ──
-    total_deduct = amount + tip_amount
-    row = db.execute('SELECT balance FROM players WHERE id=?', (pid,)).fetchone()
-    if not row or float(row['balance']) < total_deduct:
+    # ── Balance check + deduction in ONE statement, so two requests at once can't both spend it ──
+    total_deduct = round(amount + tip_amount, 2)
+    prow = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
+    if not prow:
+        db.close()
+        return err('Player not found', 404)
+    username_str = prow['username']
+    took = db.execute('UPDATE players SET balance = balance - ? WHERE id=? AND balance >= ?',
+                      (total_deduct, pid, total_deduct - 0.001))
+    if took.rowcount == 0:
         db.close()
         return err('Insufficient balance')
 
     cursor = db.execute(
         'INSERT INTO withdrawal_requests (player_id, username, amount, method, address, tip_amount) VALUES (?,?,?,?,?,?)',
-        (pid, data.get('username',''), amount, method, address, tip_amount)
+        (pid, username_str, amount, method, address, tip_amount)
     )
     rid = cursor.lastrowid
-    db.execute('UPDATE players SET balance = balance - ? WHERE id=?', (total_deduct, pid))
 
     # Record tip as a negative transaction so it shows in history
-    username_str = data.get('username', '')
     if tip_amount > 0 and tip_agent:
         db.execute(
             'INSERT INTO transactions (player_id, username, type, amount, status, notes) VALUES (?,?,?,?,?,?)',

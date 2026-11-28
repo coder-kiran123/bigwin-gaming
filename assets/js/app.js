@@ -26,8 +26,6 @@
      /api/support/messages and /api/deposits, /api/withdrawals). */
   const api = {
     user: () => BW.session.get(),
-    payments: () => store.get("bw-payments", S.payments),
-    savePayment(p) { const list = [p, ...api.payments()]; store.set("bw-payments", list); return list; },
   };
 
   /* ---------- Toast ---------- */
@@ -273,66 +271,287 @@
     listTimer = setInterval(() => !current && loadList(), 20000);
   }
 
-  /* ---------- Payments page ---------- */
-  function txRow(p) {
-    const isLoad = p.type === "Load";
+  const gameInfo = (key) => S.games.find((g) => g.key === key) || { key, name: key, image: "" };
+
+  /* ---------- Payments page (wallet: server /api/players/<id>/wallet, /api/deposits, /api/withdrawals) ---------- */
+  const money = (n) => "$" + Number(n || 0).toFixed(2);
+  const TX_LABELS = {
+    deposit: ["Added money", "in"], withdrawal: ["Cashout", "out"], add_credits: ["Loaded game", "out"],
+    withdraw_credits: ["Game → wallet", "in"], tip: ["Tip", "out"], bonus: ["Bonus", "in"],
+    signup_bonus: ["Sign-up bonus", "in"], admin_credit: ["Credit from support", "in"],
+  };
+  const STATUS = { approved: "Completed", completed: "Completed", pending: "Pending", rejected: "Failed", failed: "Failed" };
+
+  function txRow(t) {
+    const [label, dir] = TX_LABELS[t.type] || [t.type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase()), "in"];
+    const status = STATUS[t.status] || t.status || "";
+    const when = parseTime(t.created_at);
+    const sub = [t.notes || t.method || "", when ? when.toLocaleDateString([], { month: "short", day: "numeric" }) : ""].filter(Boolean).join(" · ");
     return `<div class="tx">
-      <div class="tx__icon ${isLoad ? "tx__icon--in" : "tx__icon--out"}">${isLoad ? "↓" : "↑"}</div>
-      <div class="tx__body"><strong>${esc(p.type)} · ${esc(p.game)}</strong><small>${esc(p.method)} · ${esc(p.date)}</small></div>
-      <div class="tx__amt">$${Number(p.amount).toFixed(2)}<small class="status--${esc(p.status)}">${esc(p.status)}</small></div>
+      <div class="tx__icon ${dir === "in" ? "tx__icon--in" : "tx__icon--out"}">${dir === "in" ? "↓" : "↑"}</div>
+      <div class="tx__body"><strong>${esc(label)}</strong><small>${esc(sub)}</small></div>
+      <div class="tx__amt">${money(t.amount)}<small class="status--${esc(status)}">${esc(status)}</small></div>
+    </div>`;
+  }
+  function pendingDepRow(d, methodName) {
+    const action = d.payment_url
+      ? `<a class="copy-btn" href="${esc(d.payment_url)}" target="_blank" rel="noopener">Pay</a>`
+      : d.has_screenshot ? "" : `<button class="copy-btn" type="button" data-receipt="${esc(d.id)}">Upload receipt</button>`;
+    return `<div class="tx">
+      <div class="tx__icon tx__icon--in">↓</div>
+      <div class="tx__body"><strong>Add money · ${esc(methodName || d.method)}</strong><small>${d.has_screenshot ? "Receipt sent — waiting for approval" : "Waiting for your payment"}</small></div>
+      <div class="tx__amt">${money(d.amount)}<small class="status--Pending">Pending</small>${action}</div>
     </div>`;
   }
 
-  function initPayments() {
-    const gameSel = $("#pay-game");
-    const methodSel = $("#pay-method");
-    gameSel.innerHTML = '<option value="">Select a game</option>' + S.games.map((g) => `<option>${esc(g.name)}</option>`).join("");
-    methodSel.innerHTML = '<option value="">Select a method</option>' + S.paymentMethods.map((m) => `<option>${esc(m)}</option>`).join("");
-
-    const history = $("#pay-history");
-    const renderHistory = (list) => (history.innerHTML = list.length ? list.map(txRow).join("") : '<p class="empty">No transactions yet.</p>');
-    renderHistory(api.payments());
-
-    // Load / Cashout toggle
-    let type = "Load";
-    const submit = $("#pay-submit");
-    $$(".segmented button").forEach((b) =>
-      b.addEventListener("click", () => {
-        $$(".segmented button").forEach((x) => x.setAttribute("aria-pressed", "false"));
-        b.setAttribute("aria-pressed", "true");
-        type = b.dataset.type;
-        submit.textContent = type === "Load" ? "Request load" : "Request cashout";
-        $("#pay-method-label").firstChild.textContent = type === "Load" ? "Pay with " : "Receive to ";
-      })
-    );
-
-    // Quick amounts
-    const amount = $("#pay-amount");
-    $$(".amounts button").forEach((b) =>
-      b.addEventListener("click", () => {
-        amount.value = b.dataset.amount;
-        $$(".amounts button").forEach((x) => x.classList.toggle("active", x === b));
-      })
-    );
-    amount.addEventListener("input", () => $$(".amounts button").forEach((x) => x.classList.remove("active")));
-
-    $("#pay-form").addEventListener("submit", (e) => {
-      e.preventDefault();
-      const value = parseFloat(amount.value);
-      if (!gameSel.value) return toast("Please choose a game.");
-      if (!value || value < 5) return toast("Minimum amount is $5.");
-      if (!methodSel.value) return toast("Please choose a payment method.");
-      // TODO: POST to /api/payments and show real status.
-      const list = api.savePayment({ type, game: gameSel.value, amount: value, method: methodSel.value, status: "Pending", date: "Just now" });
-      renderHistory(list);
-      e.target.reset();
-      $$(".amounts button").forEach((x) => x.classList.remove("active"));
-      toast(`${type} request sent. Support will message you in Chats.`);
+  // Phone photos are often 5–10 MB: shrink to a JPEG that fits the server's 3 MB limit
+  function shrinkImage(file, maxSide = 1600) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type.startsWith("image/")) return reject(new Error("Please choose an image file."));
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image — try another one.")); };
+      img.src = url;
     });
+  }
+  const safeUrl = (u) => (/^(https?:\/\/|\/|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(u || "") ? u : "");
+
+  async function busyBtn(btn, text, fn) {
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = text;
+    try { return await fn(); } finally { btn.disabled = false; btn.textContent = label; }
+  }
+
+  async function initPayments() {
+    let wallet = { balance: 0, transactions: [], pending_deposits: [] };
+    let methods = [], accounts = [], active = [];
+    let payingDep = null;   // deposit waiting for a receipt
+
+    /* --- Tabs --- */
+    const showPane = (name) => {
+      $$(".segmented [data-pane]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.pane === name)));
+      $$(".pane").forEach((p) => (p.hidden = p.dataset.pane !== name));
+      $("#dep-pay").hidden = true;
+    };
+    $$(".segmented [data-pane]").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
+
+    /* --- Quick amount chips --- */
+    $$(".amounts[data-for]").forEach((box) => {
+      const input = $("#" + box.dataset.for);
+      box.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-amount]");
+        if (!b) return;
+        input.value = b.dataset.amount === "all" ? Math.floor(wallet.balance) : b.dataset.amount;
+        $$("button", box).forEach((x) => x.classList.toggle("active", x === b));
+      });
+      input.addEventListener("input", () => $$("button", box).forEach((x) => x.classList.remove("active")));
+    });
+
+    /* --- Data --- */
+    const history = $("#pay-history");
+    function renderWallet() {
+      $("#wallet-balance").textContent = money(wallet.balance);
+      const bonus = $("#wallet-bonus");
+      bonus.hidden = !(wallet.bonus_credits > 0);
+      bonus.textContent = `+ ${money(wallet.bonus_credits)} bonus credits`;
+      const rows = wallet.pending_deposits.map((d) => pendingDepRow(d, (methods.find((m) => m.key === d.method) || {}).name)).concat(wallet.transactions.map(txRow));
+      history.innerHTML = rows.length ? rows.join("") : '<p class="empty">No transactions yet.</p>';
+    }
+    async function loadWallet() {
+      try { wallet = (await BW.wallet()).data; renderWallet(); }
+      catch (err) { history.innerHTML = `<p class="empty">${esc(err.message)}</p>`; }
+    }
+    function renderSelects() {
+      const opts = methods.length
+        ? '<option value="">Select a method</option>' + methods.map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("")
+        : '<option value="">No payment methods yet — message support</option>';
+      $("#dep-method").innerHTML = opts;
+      $("#wd-method").innerHTML = methods.length
+        ? '<option value="">Select a method</option>' + methods.map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("")
+        : (S.paymentMethods || []).map((m) => `<option>${esc(m)}</option>`).join("");
+      const name = (k) => (gameInfo(k).name);
+      const loadable = accounts.filter((a) => active.includes(a.game));
+      $("#load-game").innerHTML = loadable.length
+        ? '<option value="">Select a game</option>' + loadable.map((a) => `<option value="${esc(a.game)}">${esc(name(a.game))}</option>`).join("")
+        : '<option value="">Get a Game ID first (Game ID tab)</option>';
+      $("#g2w-game").innerHTML = accounts.length
+        ? '<option value="">Select a game</option>' + accounts.map((a) => `<option value="${esc(a.game)}">${esc(name(a.game))}</option>`).join("")
+        : '<option value="">No Game IDs yet</option>';
+    }
+
+    $("#wallet-refresh").addEventListener("click", loadWallet);
+    await Promise.all([
+      loadWallet(),
+      BW.paymentMethods().then((r) => (methods = r.data || [])).catch(() => {}),
+      BW.gameAccounts().then((r) => (accounts = r.data || [])).catch(() => {}),
+      BW.gamesStatus().then((r) => (active = r.data.active || [])).catch(() => {}),
+    ]);
+    renderSelects();
+    renderWallet();   // again, now that method names are known
+
+    /* --- Add money --- */
+    function showPayBox(dep) {
+      payingDep = dep;
+      const m = methods.find((x) => x.key === dep.method) || { name: dep.method };
+      $("#dep-pay-title").textContent = `Send ${money(dep.amount)} with ${m.name}`;
+      $("#dep-pay-sub").textContent = `Request #${dep.id}. Send the exact amount, then upload your receipt.`;
+      const parts = [];
+      if (m.address) parts.push(`<div class="cred__row"><span>Send to</span><code>${esc(m.address)}</code><button class="copy-btn" type="button" data-copy="${esc(m.address)}">Copy</button></div>`);
+      const qr = safeUrl(m.qr_image && (m.qr_image.startsWith("data:") || m.qr_image.startsWith("http") || m.qr_image.startsWith("/") ? m.qr_image : "/" + m.qr_image));
+      if (qr) parts.push(`<img class="pay-qr" src="${esc(qr)}" alt="${esc(m.name)} QR code">`);
+      const link = /^https?:\/\//i.test(m.payment_link || "") ? m.payment_link : "";
+      if (link) parts.push(`<a class="btn btn--outline-gold btn--block mt-16" href="${esc(link)}" target="_blank" rel="noopener">Open ${esc(m.name)}</a>`);
+      if (m.instructions) parts.push(`<p class="hint mt-16">${esc(m.instructions).replace(/\n/g, "<br>")}</p>`);
+      if (!parts.length) parts.push('<p class="hint">Support will send you the payment details in Chats.</p>');
+      $("#dep-pay-details").innerHTML = parts.join("");
+      $("#dep-shot").value = "";
+      $$(".pane").forEach((p) => (p.hidden = true));
+      $("#dep-pay").hidden = false;
+      $("#dep-pay").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    $("#f-deposit").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const amount = parseFloat($("#dep-amount").value);
+      const method = $("#dep-method").value;
+      if (!amount || amount < 5) return toast("Minimum amount is $5.");
+      if (!method) return toast("Please choose a payment method.");
+      await busyBtn($("button[type=submit]", e.target), "Creating request…", async () => {
+        try {
+          const r = (await BW.deposit(amount, method)).data;
+          e.target.reset();
+          $$(".amounts button").forEach((x) => x.classList.remove("active"));
+          loadWallet();
+          if (r.payment_url && /^https?:\/\//i.test(r.payment_url)) {
+            toast("Opening the secure payment page…");
+            location.href = r.payment_url;
+          } else {
+            showPayBox({ id: r.request_id, amount, method });
+          }
+        } catch (err) { toast(err.message); }
+      });
+    });
+
+    $("#dep-shot-send").addEventListener("click", async (e) => {
+      const file = $("#dep-shot").files[0];
+      if (!payingDep) return;
+      if (!file) return toast("Choose your payment screenshot first.");
+      await busyBtn(e.currentTarget, "Uploading…", async () => {
+        try {
+          const img = await shrinkImage(file);
+          await BW.depositScreenshot(payingDep.id, img);
+          toast("Receipt sent! We'll add the money once it's checked.");
+          payingDep = null;
+          showPane("deposit");
+          loadWallet();
+        } catch (err) { toast(err.message); }
+      });
+    });
+    $("#dep-pay-later").addEventListener("click", () => {
+      toast("You can upload the receipt later from History.");
+      payingDep = null; showPane("deposit");
+    });
+    history.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-receipt]");
+      if (!b) return;
+      const d = wallet.pending_deposits.find((x) => String(x.id) === b.dataset.receipt);
+      if (d) showPayBox(d);
+    });
+    document.addEventListener("click", async (e) => {
+      const c = e.target.closest("#dep-pay [data-copy]");
+      if (!c) return;
+      try { await navigator.clipboard.writeText(c.dataset.copy); toast("Copied."); } catch (err) { toast("Couldn't copy — please copy it manually."); }
+    });
+
+    /* --- Load game --- */
+    $("#f-load").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const game = $("#load-game").value;
+      const amount = parseFloat($("#load-amount").value);
+      if (!game) return toast("Please choose a game.");
+      if (!amount || amount <= 0) return toast("Enter an amount.");
+      await busyBtn($("button[type=submit]", e.target), "Loading…", async () => {
+        try {
+          const r = await BW.loadGame(game, amount);
+          toast(r.msg || "Game loaded!");
+          e.target.reset();
+          loadWallet();
+        } catch (err) {
+          if (err.data && err.data.insufficient) {
+            toast(`Your wallet is ${money(err.data.shortfall)} short. Add money first.`);
+            showPane("deposit");
+            $("#dep-amount").value = Math.max(5, Math.ceil(err.data.shortfall));
+          } else toast(err.message);
+        }
+      });
+    });
+
+    /* --- Cash out: game → wallet --- */
+    $("#g2w-game").addEventListener("change", async (e) => {
+      const game = e.target.value, out = $("#g2w-bal");
+      out.textContent = "";
+      if (!game) return;
+      out.textContent = "Checking game balance…";
+      try {
+        const r = (await BW.gameBalance(game)).data;
+        if ($("#g2w-game").value !== game) return;
+        out.textContent = `Balance in game: ${money(r.balance)}`;
+        $("#g2w-amount").value = r.balance > 0 ? Number(r.balance).toFixed(2) : "";
+      } catch (err) { out.textContent = err.message; }
+    });
+    $("#f-g2w").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const game = $("#g2w-game").value;
+      const amount = parseFloat($("#g2w-amount").value);
+      if (!game) return toast("Please choose a game.");
+      if (!amount || amount <= 0) return toast("Enter an amount.");
+      await busyBtn($("button[type=submit]", e.target), "Moving…", async () => {
+        try {
+          const r = await BW.gameToWallet(game, amount);
+          toast(r.msg || "Added to your wallet.");
+          e.target.reset(); $("#g2w-bal").textContent = "";
+          await loadWallet();
+          $("#wd-amount").value = Number(wallet.balance).toFixed(2);
+        } catch (err) { toast(err.message); }
+      });
+    });
+
+    /* --- Cash out: wallet → player --- */
+    $("#f-withdraw").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const amount = parseFloat($("#wd-amount").value);
+      const method = $("#wd-method").value;
+      const address = $("#wd-address").value.trim();
+      if (!amount || amount <= 0) return toast("Enter an amount.");
+      if (amount > wallet.balance + 0.001) return toast(`Your wallet has ${money(wallet.balance)}. Move winnings from a game first.`);
+      if (!method) return toast("Please choose how to receive it.");
+      if (!address) return toast("Enter where we should send it.");
+      await busyBtn($("button[type=submit]", e.target), "Sending request…", async () => {
+        try {
+          const r = await BW.withdraw(amount, method, address);
+          e.target.reset();
+          loadWallet();
+          if (r.data && r.data.payout_url && /^https?:\/\//i.test(r.data.payout_url)) {
+            toast("Cashout ready — opening your payout page…");
+            setTimeout(() => (location.href = r.data.payout_url), 900);
+          } else toast("Cashout requested. We'll message you in Chats when it's sent.");
+        } catch (err) { toast(err.message); }
+      });
+    });
+
+    // Back from a card checkout (?paid=…) or a fresh visit: keep history current
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) loadWallet(); });
   }
 
   /* ---------- Game ID page (live: server creates the account on the game's agent portal) ---------- */
-  const gameInfo = (key) => S.games.find((g) => g.key === key) || { key, name: key, image: "" };
 
   function credCard(acc, password) {
     const g = gameInfo(acc.game);

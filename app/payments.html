@@ -30,38 +30,112 @@
     </header>
 
     <main>
+      <!-- Wallet balance -->
+      <section class="panel wallet">
+        <div>
+          <p class="wallet__label">Wallet balance</p>
+          <p class="wallet__amt" id="wallet-balance">$—</p>
+          <p class="wallet__sub" id="wallet-bonus" hidden></p>
+        </div>
+        <button class="icon-btn" type="button" id="wallet-refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg></button>
+      </section>
+
       <section class="panel">
-        <h2>New request</h2>
-        <form id="pay-form" class="stack gap-20" novalidate>
-          <div class="segmented" role="group" aria-label="Request type" style="margin-bottom:0">
-            <button type="button" data-type="Load" aria-pressed="true">Load</button>
-            <button type="button" data-type="Cashout" aria-pressed="false">Cashout</button>
-          </div>
+        <div class="segmented segmented--3" role="group" aria-label="What do you want to do?">
+          <button type="button" data-pane="deposit" aria-pressed="true">Add money</button>
+          <button type="button" data-pane="load" aria-pressed="false">Load game</button>
+          <button type="button" data-pane="cashout" aria-pressed="false">Cash out</button>
+        </div>
+
+        <!-- Add money -->
+        <form id="f-deposit" class="pane stack gap-20" data-pane="deposit" novalidate>
           <div class="field">
-            <label for="pay-game">Game <span class="req">*</span></label>
-            <select class="input" id="pay-game"></select>
-          </div>
-          <div class="field">
-            <label for="pay-amount">Amount (USD) <span class="req">*</span></label>
-            <input class="input" id="pay-amount" type="number" min="5" step="1" inputmode="decimal" placeholder="$0">
-            <div class="amounts">
-              <button type="button" data-amount="10">$10</button>
-              <button type="button" data-amount="25">$25</button>
-              <button type="button" data-amount="50">$50</button>
-              <button type="button" data-amount="100">$100</button>
+            <label for="dep-amount">Amount (USD) <span class="req">*</span></label>
+            <input class="input" id="dep-amount" type="number" min="5" step="1" inputmode="decimal" placeholder="$0">
+            <div class="amounts" data-for="dep-amount">
+              <button type="button" data-amount="10">$10</button><button type="button" data-amount="25">$25</button>
+              <button type="button" data-amount="50">$50</button><button type="button" data-amount="100">$100</button>
             </div>
           </div>
           <div class="field">
-            <label for="pay-method" id="pay-method-label">Pay with <span class="req">*</span></label>
-            <select class="input" id="pay-method"></select>
+            <label for="dep-method">Pay with <span class="req">*</span></label>
+            <select class="input" id="dep-method"></select>
           </div>
-          <button type="submit" class="btn btn--gold btn--block" id="pay-submit">Request load</button>
+          <button type="submit" class="btn btn--gold btn--block">Continue</button>
         </form>
+
+        <!-- Step 2 of Add money: how to pay + receipt upload -->
+        <div id="dep-pay" class="pay-box" hidden>
+          <h3 id="dep-pay-title"></h3>
+          <p class="text-muted" id="dep-pay-sub"></p>
+          <div id="dep-pay-details"></div>
+          <div class="field mt-16">
+            <label for="dep-shot">Payment screenshot <span class="req">*</span></label>
+            <input class="input input--file" id="dep-shot" type="file" accept="image/*">
+            <p class="hint">After paying, upload a screenshot of the receipt. We'll add the money once it's checked.</p>
+          </div>
+          <div class="stack gap-12 mt-16">
+            <button type="button" class="btn btn--gold btn--block" id="dep-shot-send">Send screenshot</button>
+            <button type="button" class="btn btn--dark btn--block" id="dep-pay-later">I'll do it later</button>
+          </div>
+        </div>
+
+        <!-- Load game -->
+        <form id="f-load" class="pane stack gap-20" data-pane="load" novalidate hidden>
+          <div class="field">
+            <label for="load-game">Game <span class="req">*</span></label>
+            <select class="input" id="load-game"></select>
+          </div>
+          <div class="field">
+            <label for="load-amount">Amount (USD) <span class="req">*</span></label>
+            <input class="input" id="load-amount" type="number" min="1" step="1" inputmode="decimal" placeholder="$0">
+            <div class="amounts" data-for="load-amount">
+              <button type="button" data-amount="10">$10</button><button type="button" data-amount="25">$25</button>
+              <button type="button" data-amount="50">$50</button><button type="button" data-amount="all">All</button>
+            </div>
+            <p class="hint">Moves money from your wallet into the game.</p>
+          </div>
+          <button type="submit" class="btn btn--gold btn--block">Load game</button>
+        </form>
+
+        <!-- Cash out -->
+        <div class="pane" data-pane="cashout" hidden>
+          <form id="f-g2w" class="stack gap-20" novalidate>
+            <h3 class="pane__title">1. Move winnings to your wallet</h3>
+            <div class="field">
+              <label for="g2w-game">Game</label>
+              <select class="input" id="g2w-game"></select>
+              <p class="hint" id="g2w-bal"></p>
+            </div>
+            <div class="field">
+              <label for="g2w-amount">Amount (USD)</label>
+              <input class="input" id="g2w-amount" type="number" min="1" step="0.01" inputmode="decimal" placeholder="$0">
+            </div>
+            <button type="submit" class="btn btn--dark btn--block">Move to wallet</button>
+          </form>
+
+          <form id="f-withdraw" class="stack gap-20 mt-24" novalidate>
+            <h3 class="pane__title">2. Withdraw from your wallet</h3>
+            <div class="field">
+              <label for="wd-amount">Amount (USD) <span class="req">*</span></label>
+              <input class="input" id="wd-amount" type="number" min="1" step="0.01" inputmode="decimal" placeholder="$0">
+            </div>
+            <div class="field">
+              <label for="wd-method">Receive with <span class="req">*</span></label>
+              <select class="input" id="wd-method"></select>
+            </div>
+            <div class="field">
+              <label for="wd-address">Send it to <span class="req">*</span></label>
+              <input class="input" id="wd-address" type="text" autocomplete="off" autocapitalize="off" placeholder="$Cashtag, email, phone or wallet address">
+            </div>
+            <button type="submit" class="btn btn--gold btn--block">Request cashout</button>
+          </form>
+        </div>
       </section>
 
       <section class="panel">
         <h2>History</h2>
-        <div id="pay-history"></div>
+        <div id="pay-history"><p class="empty">Loading…</p></div>
       </section>
     </main>
   </div>
