@@ -4875,6 +4875,257 @@ def staff_auto_load(rid):
     return ok(msg='⚡ Loaded automatically — the player was told in chat') if done else err(msg)
 
 
+# ─────────────────────────────────────────
+#  GAME ID LINKS (connect a player's existing panel account to their website account)
+#  Panels can't check a game password for us, so a player can only *ask*; staff confirm.
+# ─────────────────────────────────────────
+_GAME_USER = re.compile(r'^[A-Za-z0-9_.@-]{3,40}$')
+
+
+def _setting_on(db, key, default=True):
+    row = db.execute('SELECT value FROM site_settings WHERE key=?', (key,)).fetchone()
+    return (row['value'] == '1') if row and row['value'] in ('0', '1') else default
+
+
+def _link_settings(db):
+    return {'requests_enabled': _setting_on(db, 'link_requests_enabled', True),
+            'agents_can_link': _setting_on(db, 'link_agents_enabled', True)}
+
+
+def _can_link():
+    """'Admin', or the agent's name when admin lets agents link; else None."""
+    if _verify_admin_token(request.headers.get('X-Admin-Token', '')):
+        return 'Admin'
+    agent = get_support_agent()
+    if not agent:
+        return None
+    db = get_db()
+    try:
+        return agent if _link_settings(db)['agents_can_link'] else None
+    finally:
+        db.close()
+
+
+def _panel_lookup(db, game, game_username):
+    """Ask the game's panel whether this username exists. Returns (checked, exists, balance, message)."""
+    brow = db.execute("SELECT * FROM backends WHERE game=? AND status='connected' ORDER BY enabled DESC, created_at DESC LIMIT 1",
+                      (game,)).fetchone()
+    if not brow:
+        return False, None, None, f'{_gname(game)} is not connected under Backends — check the username in the panel yourself.'
+    b = dict(brow)
+    try:
+        api = get_api(b['game'], b['username'], b['password'], b['token'], b['base_url'])
+        bal, e = api.get_balance(game_username)
+    except Exception as ex:
+        bal, e = None, f'API error: {ex}'
+    if bal is not None:
+        return True, True, bal, f'Found on {_gname(game)} — balance ${float(bal):.2f}'
+    return True, False, None, f'Not found on {_gname(game)}: {e}'
+
+
+def _do_link(db, pid, game, game_username):
+    """Create the game_accounts row. Returns error text or ''."""
+    if db.execute('SELECT 1 FROM game_accounts WHERE player_id=? AND game=?', (pid, game)).fetchone():
+        return f'This player already has a {_gname(game)} Game ID.'
+    taken = db.execute('SELECT player_id FROM game_accounts WHERE game=? AND LOWER(game_username)=LOWER(?)',
+                       (game, game_username)).fetchone()
+    if taken:
+        return f'{game_username} is already linked to another website account (player #{taken["player_id"]}).'
+    db.execute("INSERT INTO game_accounts (player_id, game, game_username, game_password) VALUES (?,?,?,'')",
+               (pid, game, game_username))
+    return ''
+
+
+@app.route('/api/link-settings', methods=['GET'])
+def public_link_settings():
+    db = get_db()
+    try:
+        return ok({'requests_enabled': _link_settings(db)['requests_enabled']})
+    finally:
+        db.close()
+
+
+@app.route('/api/admin/link-settings', methods=['GET', 'POST'])
+@require_admin
+def admin_link_settings():
+    db = get_db()
+    try:
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            for field, key in (('requests_enabled', 'link_requests_enabled'), ('agents_can_link', 'link_agents_enabled')):
+                if field in data:
+                    _upsert_setting(db, key, '1' if data[field] else '0')
+        return ok(_link_settings(db), 'Saved' if request.method == 'POST' else 'OK')
+    finally:
+        db.close()
+
+
+@app.route('/api/players/<int:pid>/link-requests', methods=['GET', 'POST'])
+@require_player
+@limiter.limit('5 per minute; 20 per hour', methods=['POST'])
+def player_link_requests(pid):
+    db = get_db()
+    try:
+        if request.method == 'GET':
+            rows = db.execute('SELECT id, game, game_username, status, note, created_at FROM link_requests '
+                              'WHERE player_id=? ORDER BY id DESC LIMIT 20', (pid,)).fetchall()
+            return ok(rows_to_list(rows))
+        if not _link_settings(db)['requests_enabled']:
+            return err('Linking old accounts is turned off right now — message support in Chats.')
+        data = request.get_json(silent=True) or {}
+        game = str(data.get('game') or '').strip().lower()
+        gu   = str(data.get('game_username') or '').strip()
+        if not _GAME_KEY.match(game):
+            return err('Please choose a game.')
+        if not _GAME_USER.match(gu):
+            return err('Enter your game username (letters and numbers, 3–40 characters).')
+        if db.execute('SELECT 1 FROM game_accounts WHERE player_id=? AND game=?', (pid, game)).fetchone():
+            return err(f'You already have a {_gname(game)} Game ID.')
+        if db.execute("SELECT 1 FROM link_requests WHERE player_id=? AND game=? AND status='pending'", (pid, game)).fetchone():
+            return err(f'You already asked to link a {_gname(game)} account — support will check it soon.')
+        prow = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
+        cur = db.execute('INSERT INTO link_requests (player_id, username, game, game_username) VALUES (?,?,?,?)',
+                         (pid, prow['username'], game, gu))
+        rid = cur.lastrowid
+        agent = _get_available_agent(db)
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (pid, prow['username'], agent, 'player',
+                    f'🔗 Link request #{rid}\nGame: {_gname(game)}\nMy username there: {gu}'))
+        db.commit()
+        _tg.notify('support', f"🔗 <b>Link request #{rid}</b>\nPlayer: <b>{_e(prow['username'])}</b>\n"
+                              f"{_e(_gname(game))} username: <code>{_e(gu)}</code>\n<i>Check it in admin → Game ID Links.</i>")
+        return ok({'id': rid}, "Sent! Support will check it and link it — you'll get a message in Chats.")
+    finally:
+        db.close()
+
+
+@app.route('/api/staff/link-requests', methods=['GET'])
+def staff_link_requests():
+    if not _staff_name():
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    status = request.args.get('status', 'pending')
+    db = get_db()
+    try:
+        if status == 'all':
+            rows = db.execute('SELECT * FROM link_requests ORDER BY id DESC LIMIT 100').fetchall()
+        else:
+            rows = db.execute("SELECT * FROM link_requests WHERE status='pending' ORDER BY id ASC LIMIT 100").fetchall()
+        pending = db.execute("SELECT COUNT(*) AS n FROM link_requests WHERE status='pending'").fetchone()['n']
+        out = rows_to_list(rows)
+        for r in out:
+            r['game_name'] = _gname(r['game'])
+        return ok({'requests': out, 'pending': pending, 'settings': _link_settings(db),
+                   'can_link': bool(_can_link()),
+                   'games': [{'key': k, 'name': v} for k, v in sorted(_GAME_NAMES.items(), key=lambda kv: kv[1])]})
+    finally:
+        db.close()
+
+
+@app.route('/api/staff/link-check', methods=['POST'])
+def staff_link_check():
+    """Look a username up on the game's panel (before approving or linking)."""
+    if not _staff_name():
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    data = request.get_json(silent=True) or {}
+    game = str(data.get('game') or '').strip().lower()
+    gu   = str(data.get('game_username') or '').strip()
+    if not _GAME_KEY.match(game) or not _GAME_USER.match(gu):
+        return err('Pick a game and enter a valid username.')
+    db = get_db()
+    try:
+        checked, exists, bal, msg = _panel_lookup(db, game, gu)
+    finally:
+        db.close()
+    return ok({'checked': checked, 'exists': exists, 'balance': bal}, msg)
+
+
+@app.route('/api/staff/link-requests/<int:rid>/<action>', methods=['POST'])
+def staff_finish_link(rid, action):
+    by = _can_link()
+    if not by:
+        return jsonify({'success': False, 'msg': 'Only the admin can link accounts right now.'}), 401
+    if action not in ('approve', 'reject'):
+        return err('Unknown action', 404)
+    note = str((request.get_json(silent=True) or {}).get('note') or '').strip()[:300]
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM link_requests WHERE id=?", (rid,)).fetchone()
+        if not row:
+            return err('Link request not found', 404)
+        r = dict(row)
+        if r['status'] != 'pending':
+            return err(f"Already {r['status']} by {r['handled_by'] or 'someone'}")
+        game = _gname(r['game'])
+        if action == 'approve':
+            checked, exists, _bal, msg = _panel_lookup(db, r['game'], r['game_username'])
+            if checked and not exists:
+                return err(msg + ' — fix the username or reject the request.')
+        # Claim it first so two staff can't both handle it
+        cur = db.execute("UPDATE link_requests SET status=?, handled_by=?, note=?, handled_at=? WHERE id=? AND status='pending'",
+                         ('approved' if action == 'approve' else 'rejected', by, note,
+                          datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), rid))
+        db.commit()
+        if cur.rowcount == 0:
+            return err('Someone else just handled this request.')
+        if action == 'approve':
+            problem = _do_link(db, r['player_id'], r['game'], r['game_username'])
+            if problem:
+                db.execute("UPDATE link_requests SET status='pending', handled_by='', handled_at='' WHERE id=?", (rid,))
+                db.commit()
+                return err(problem)
+            text = f"✅ Your {game} account {r['game_username']} is now linked. You can load and cash out from the Payments tab."
+        else:
+            text = (f"❌ We couldn't link {game} account {r['game_username']}."
+                    + (f' {note}' if note else ' Please check the username or message us here.'))
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (r['player_id'], r['username'], _get_available_agent(db), 'agent', text))
+        db.commit()
+        return ok(msg=('Linked — the player was told in chat' if action == 'approve' else 'Rejected — the player was told in chat'))
+    finally:
+        db.close()
+
+
+@app.route('/api/staff/link-direct', methods=['POST'])
+def staff_link_direct():
+    """Staff link an existing panel username to a website account without a request."""
+    by = _can_link()
+    if not by:
+        return jsonify({'success': False, 'msg': 'Only the admin can link accounts right now.'}), 401
+    data = request.get_json(silent=True) or {}
+    who  = str(data.get('player') or '').strip()
+    game = str(data.get('game') or '').strip().lower()
+    gu   = str(data.get('game_username') or '').strip()
+    if not who or not _GAME_KEY.match(game) or not _GAME_USER.match(gu):
+        return err('Enter the website account, pick a game and enter the game username.')
+    db = get_db()
+    try:
+        prow = db.execute('SELECT id, username FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
+                          (who, who)).fetchone()
+        if not prow:
+            return err(f'No website account "{who}" — use their email or username.')
+        checked, exists, _bal, msg = _panel_lookup(db, game, gu)
+        if checked and not exists:
+            return err(msg)
+        problem = _do_link(db, prow['id'], game, gu)
+        if problem:
+            return err(problem)
+        # Close any waiting request for this game: approved if it was this username, otherwise superseded
+        now_s = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        db.execute("UPDATE link_requests SET status='approved', handled_by=?, handled_at=? "
+                   "WHERE player_id=? AND game=? AND status='pending' AND LOWER(game_username)=LOWER(?)",
+                   (by, now_s, prow['id'], game, gu))
+        db.execute("UPDATE link_requests SET status='rejected', handled_by=?, handled_at=?, note=? "
+                   "WHERE player_id=? AND game=? AND status='pending'",
+                   (by, now_s, f'Linked {gu} instead', prow['id'], game))
+        db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
+                   (prow['id'], prow['username'], _get_available_agent(db), 'agent',
+                    f"✅ Your {_gname(game)} account {gu} is now linked to this website account."))
+        db.commit()
+        return ok(msg=f"Linked {gu} ({_gname(game)}) to {prow['username']}" + ('' if checked else ' — not checked on a panel'))
+    finally:
+        db.close()
+
+
 @app.route('/api/staff/dashboard', methods=['GET'])
 @require_admin
 def staff_dashboard():

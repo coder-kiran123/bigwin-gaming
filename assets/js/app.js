@@ -578,7 +578,9 @@
         try {
           const res = await BW.gameLogin(show.dataset.show);
           const row = show.closest("[data-pw]");
-          row.innerHTML = `<span>Password</span><code>${esc(res.data.password)}</code><button class="copy-btn" data-copy="${esc(res.data.password)}">Copy</button>`;
+          row.innerHTML = res.data.password
+            ? `<span>Password</span><code>${esc(res.data.password)}</code><button class="copy-btn" data-copy="${esc(res.data.password)}">Copy</button>`
+            : `<span>Password</span><small class="text-muted">Your existing password (linked account)</small>`;
         } catch (err) {
           toast(err.message);
           show.disabled = false;
@@ -606,6 +608,46 @@
         submit.textContent = label;
         renderSelect();
       }
+    });
+
+    /* --- "Already have an account?" → link request (staff confirm it; admin can switch this off) --- */
+    const linkPanel = $("#link-panel");
+    let linkOn = false;
+    try { linkOn = (await BW.linkSettings()).data.requests_enabled; } catch (e) { /* stays hidden */ }
+    if (!linkPanel || !linkOn) return;
+    linkPanel.hidden = false;
+    const lSel = $("#link-game"), lUser = $("#link-user"), lForm = $("#link-form"), lList = $("#link-list");
+    const LINK_ST = { pending: ["Waiting for support", "Pending"], approved: ["Linked", "Completed"], rejected: ["Not linked", "Failed"] };
+    const renderLinkSelect = () => {
+      const owned = new Set(accounts.map((a) => a.game));
+      const avail = S.games.filter((g) => !owned.has(g.key));
+      lSel.innerHTML = '<option value="">Select a game</option>' + avail.map((g) => `<option value="${esc(g.key)}">${esc(g.name)}</option>`).join("");
+    };
+    const loadLinks = async () => {
+      try {
+        const list = (await BW.linkRequests()).data || [];
+        lList.innerHTML = list.map((r) => {
+          const [label, cls] = LINK_ST[r.status] || [r.status, ""];
+          return `<div class="tx"><div class="tx__body"><strong>${esc(gameInfo(r.game).name)} · ${esc(r.game_username)}</strong>
+            ${r.note ? `<small>${esc(r.note)}</small>` : ""}</div><div class="tx__amt"><small class="status--${cls}">${esc(label)}</small></div></div>`;
+        }).join("");
+      } catch (e) { lList.innerHTML = ""; }
+    };
+    renderLinkSelect();
+    loadLinks();
+    lForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const game = lSel.value, user = lUser.value.trim();
+      if (!game) return toast("Please choose a game.");
+      if (!/^[A-Za-z0-9_.@-]{3,40}$/.test(user)) return toast("Enter your username on that game.");
+      await busyBtn($("button[type=submit]", lForm), "Sending…", async () => {
+        try {
+          const r = await BW.createLinkRequest(game, user);
+          lForm.reset();
+          toast(r.msg || "Sent! Support will check it.");
+          loadLinks();
+        } catch (err) { toast(err.message); }
+      });
     });
   }
 

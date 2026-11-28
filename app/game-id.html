@@ -46,6 +46,24 @@
         </form>
       </section>
 
+      <!-- Link an existing game account (shown only when the admin allows it) -->
+      <section class="panel" id="link-panel" hidden>
+        <h2>Already have an account?</h2>
+        <p class="text-muted" style="margin-bottom:16px">Played with us before? Tell us your username and support will link it to this account.</p>
+        <form id="link-form" class="stack gap-20" novalidate>
+          <div class="field">
+            <label for="link-game">Game <span class="req">*</span></label>
+            <select class="input" id="link-game"></select>
+          </div>
+          <div class="field">
+            <label for="link-user">Your username on that game <span class="req">*</span></label>
+            <input class="input" id="link-user" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. sam123">
+          </div>
+          <button type="submit" class="btn btn--outline-gold btn--block">Ask to link</button>
+        </form>
+        <div id="link-list" class="mt-16"></div>
+      </section>
+
       <section class="panel">
         <h2>Account</h2>
         <div class="stack gap-12">

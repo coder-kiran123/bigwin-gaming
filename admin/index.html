@@ -131,6 +131,11 @@
         Live Support
         <span id="supportNavBadge" class="nav-badge" style="display:none"></span>
       </a>
+      <a href="#" class="nav-item" data-page="game-links" onclick="showPage('game-links',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Game ID Links
+        <span id="glNavBadge" class="nav-badge" style="display:none"></span>
+      </a>
     </div>
 
     <div class="nav-section" data-admin>
@@ -973,6 +978,51 @@
           </div>
         </div>
         <div id="lrList"></div>
+      </div>
+    </div>
+
+    <div id="page-game-links" class="page">
+      <div class="section-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+          <h3 style="margin:0">Game ID Links</h3>
+          <div style="display:flex;gap:8px">
+            <button class="lr-tab" data-gl="pending" onclick="setGlFilter('pending')">Waiting</button>
+            <button class="lr-tab" data-gl="all" onclick="setGlFilter('all')">All</button>
+          </div>
+        </div>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
+          Connect a player's existing game account (from before the website) to their website account.
+          <strong>Check</strong> looks the username up on the game panel when that game is connected under Backends.
+          Only approve when you're sure it's really their account.</p>
+
+        <div data-admin>
+          <div class="auto-switch">
+            <label class="switch"><input type="checkbox" id="glReqToggle" onchange="setLinkSetting('requests_enabled', this.checked)"><span></span></label>
+            <div><strong>Players can ask to link</strong> <span class="auto-state" id="glReqState">ON</span>
+              <div class="lr-sub">Shows "Already have an account?" on the player's Game ID tab.</div></div>
+          </div>
+          <div class="auto-switch">
+            <label class="switch"><input type="checkbox" id="glAgentToggle" onchange="setLinkSetting('agents_can_link', this.checked)"><span></span></label>
+            <div><strong>Support agents can link</strong> <span class="auto-state" id="glAgentState">ON</span>
+              <div class="lr-sub">When off, only the admin can approve or link accounts.</div></div>
+          </div>
+        </div>
+
+        <details class="gl-direct">
+          <summary>➕ Link an account directly</summary>
+          <form onsubmit="event.preventDefault(); linkDirect(this)" class="gl-form">
+            <input name="player" placeholder="Website account (email or username)" autocomplete="off" required>
+            <select name="game" id="glGame" required></select>
+            <input name="game_username" placeholder="Game username" autocomplete="off" autocapitalize="off" required>
+            <div class="gl-actions">
+              <button type="button" class="lr-btn lr-btn--no" onclick="checkDirect(this.form)">Check</button>
+              <button type="submit" class="lr-btn lr-btn--ok">Link</button>
+            </div>
+            <div class="lr-sub gl-out"></div>
+          </form>
+        </details>
+
+        <div id="glList"></div>
       </div>
     </div>
 

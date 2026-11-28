@@ -156,6 +156,7 @@ function showPage(pageId, clickedEl) {
     'cashout-rules':      'Cashout Rules',
     'support-chat':       'Live Support',
     'load-requests':      'Load Requests',
+    'game-links':         'Game ID Links',
     'referrals':          'Referral Program',
   };
   document.getElementById('pageTitle').textContent = titles[pageId] || pageId;
@@ -182,6 +183,7 @@ function showPage(pageId, clickedEl) {
   if (pageId === 'cashout-rules')      renderCashoutRules();
   if (pageId === 'support-chat')        { loadConversations(); }
   if (pageId === 'load-requests')       renderLoadRequests();
+  if (pageId === 'game-links')          renderGameLinks();
   if (pageId === 'support-agents')      { renderSupportAgents(); }
   if (pageId === 'referrals')          { loadReferrals(); }
   if (pageId === 'roulette-admin')     { loadRoulettePrizes(); loadRouletteSpins(); }
@@ -1929,6 +1931,100 @@ async function setAutoLoad(on) {
   renderLoadRequests();
 }
 
+// ── GAME ID LINKS (existing panel account → website account) ──
+let glFilter = 'pending';
+function setGlFilter(f) { glFilter = f; renderGameLinks(); }
+
+async function renderGameLinks() {
+  document.querySelectorAll('[data-gl]').forEach(t => t.classList.toggle('active', t.dataset.gl === glFilter));
+  const box = document.getElementById('glList');
+  if (!box) return;
+  const res = await apiFetch('/staff/link-requests?status=' + glFilter);
+  if (!res.success) { box.innerHTML = `<p style="color:#ef4444">${lrEsc(res.msg || 'Could not load')}</p>`; return; }
+  const d = res.data;
+  glBadge(d.pending);
+  // Switches (admin only)
+  [['glReqToggle', 'glReqState', d.settings.requests_enabled], ['glAgentToggle', 'glAgentState', d.settings.agents_can_link]]
+    .forEach(([t, s, on]) => {
+      const tg = document.getElementById(t), st = document.getElementById(s);
+      if (tg) tg.checked = on;
+      if (st) { st.textContent = on ? 'ON' : 'OFF'; st.classList.toggle('on', on); }
+    });
+  const sel = document.getElementById('glGame');
+  if (sel && !sel.options.length) sel.innerHTML = '<option value="">Game…</option>' + d.games.map(g => `<option value="${lrEsc(g.key)}">${lrEsc(g.name)}</option>`).join('');
+  document.querySelector('.gl-direct').style.display = d.can_link ? '' : 'none';
+  if (!d.requests.length) {
+    box.innerHTML = `<p style="color:var(--muted);padding:24px 0;text-align:center">${glFilter === 'pending' ? '🎉 No link requests waiting.' : 'No link requests yet.'}</p>`;
+    return;
+  }
+  const chip = st => st === 'approved' ? ['#dcfce7', '#166534', 'Linked'] : st === 'rejected' ? ['#fee2e2', '#991b1b', 'Rejected'] : ['#fef3c7', '#92400e', 'Waiting'];
+  box.innerHTML = d.requests.map(r => {
+    const c = chip(r.status), done = r.status !== 'pending';
+    const when = new Date(String(r.created_at).replace(' ', 'T') + 'Z');
+    return `<div class="lr-card" id="gl-${r.id}">
+      <div class="lr-main"><div>
+        <div class="lr-line"><strong>${lrEsc(r.game_name)}</strong> · <code>${lrEsc(r.game_username)}</code></div>
+        <div class="lr-sub">#${r.id} · website account ${lrEsc(r.username)} · ${isNaN(when) ? '' : when.toLocaleString()}</div>
+        ${done ? `<div class="lr-sub">${c[2]} by ${lrEsc(r.handled_by)}${r.note ? ' — ' + lrEsc(r.note) : ''}</div>` : ''}
+        <div class="lr-sub gl-out"></div>
+      </div></div>
+      <div class="lr-side">
+        ${done ? `<span class="lr-chip" style="background:${c[0]};color:${c[1]}">${c[2]}</span>`
+          : `<button class="lr-btn lr-btn--no" onclick="checkLink(${r.id},'${lrEsc(r.game)}',this)">Check</button>
+             ${d.can_link ? `<button class="lr-btn lr-btn--ok" onclick="finishLink(${r.id},'approve',this)">Approve</button>
+             <button class="lr-btn lr-btn--no" onclick="finishLink(${r.id},'reject',this)">Reject</button>` : '<span class="lr-sub">Admin approves</span>'}`}
+      </div>
+    </div>`;
+  }).join('');
+  window._glCache = Object.fromEntries(d.requests.map(r => [r.id, r]));
+}
+
+function glBadge(n) {
+  const b = document.getElementById('glNavBadge');
+  if (b) { b.textContent = n; b.style.display = n ? '' : 'none'; }
+}
+
+async function lookupOnPanel(game, game_username, out) {
+  out.textContent = 'Checking on the game panel…'; out.style.color = '';
+  const res = await apiFetch('/staff/link-check', 'POST', { game, game_username });
+  out.textContent = res.msg || (res.success ? '' : 'Check failed');
+  out.style.color = !res.success ? '#ef4444' : res.data.exists ? '#16a34a' : res.data.checked ? '#ef4444' : '#b45309';
+}
+function checkLink(id, game, btn) {
+  const r = (window._glCache || {})[id];
+  if (r) lookupOnPanel(r.game, r.game_username, document.querySelector(`#gl-${id} .gl-out`));
+}
+function checkDirect(form) {
+  lookupOnPanel(form.game.value, form.game_username.value.trim(), form.querySelector('.gl-out'));
+}
+
+async function finishLink(id, action, btn) {
+  let note = '';
+  if (action === 'reject') {
+    note = prompt('Reason (the player will see this):', "We couldn't find that username.");
+    if (note === null) return;
+  }
+  btn.disabled = true;
+  const res = await apiFetch(`/staff/link-requests/${id}/${action}`, 'POST', { note });
+  if (!res.success) alert(res.msg || 'Failed');
+  renderGameLinks();
+}
+
+async function linkDirect(form) {
+  const out = form.querySelector('.gl-out');
+  const res = await apiFetch('/staff/link-direct', 'POST', {
+    player: form.player.value.trim(), game: form.game.value, game_username: form.game_username.value.trim() });
+  out.textContent = res.msg || (res.success ? 'Linked' : 'Failed');
+  out.style.color = res.success ? '#16a34a' : '#ef4444';
+  if (res.success) { form.reset(); renderGameLinks(); }
+}
+
+async function setLinkSetting(field, on) {
+  const res = await apiFetch('/admin/link-settings', 'POST', { [field]: on });
+  if (!res.success) alert(res.msg || 'Could not save');
+  renderGameLinks();
+}
+
 function lrShowShot(id) {
   const r = (window._lrCache || {})[id];
   if (!r || !lrImg(r.screenshot)) return;
@@ -1954,6 +2050,9 @@ setInterval(() => {
   const page = document.getElementById('page-load-requests');
   if (page && page.classList.contains('active')) renderLoadRequests();
   else apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending));
+  const gl = document.getElementById('page-game-links');
+  if (gl && gl.classList.contains('active')) renderGameLinks();
+  else apiFetch('/staff/link-requests?status=pending').then(r => r.success && glBadge(r.data.pending));
 }, 10000);
 setTimeout(() => isStaff() && apiFetch('/staff/load-requests?status=pending').then(r => r.success && lrBadge(r.data.pending)), 1500);
 

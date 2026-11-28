@@ -459,6 +459,11 @@ def init_db():
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS referred_by_name TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS google_uid TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS avatar TEXT DEFAULT ''",
+            """CREATE TABLE IF NOT EXISTS link_requests (
+                id SERIAL PRIMARY KEY, player_id INTEGER NOT NULL, username TEXT NOT NULL,
+                game TEXT NOT NULL, game_username TEXT NOT NULL, status TEXT DEFAULT 'pending',
+                handled_by TEXT DEFAULT '', note TEXT DEFAULT '', handled_at TEXT DEFAULT '',
+                created_at TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))""",
             """CREATE TABLE IF NOT EXISTS load_requests (
                 id SERIAL PRIMARY KEY, player_id INTEGER, username TEXT NOT NULL,
                 game TEXT NOT NULL, game_username TEXT DEFAULT '', amount REAL NOT NULL,
@@ -531,6 +536,11 @@ def init_db():
             "ALTER TABLE players ADD COLUMN referred_by_name TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN google_uid TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN avatar TEXT DEFAULT ''",
+            """CREATE TABLE IF NOT EXISTS link_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INTEGER NOT NULL, username TEXT NOT NULL,
+                game TEXT NOT NULL, game_username TEXT NOT NULL, status TEXT DEFAULT 'pending',
+                handled_by TEXT DEFAULT '', note TEXT DEFAULT '', handled_at TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')))""",
             """CREATE TABLE IF NOT EXISTS load_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INTEGER, username TEXT NOT NULL,
                 game TEXT NOT NULL, game_username TEXT DEFAULT '', amount REAL NOT NULL,

@@ -88,6 +88,11 @@ window.BW = (function () {
     loadRequests: () => request(`/players/${pid()}/load-requests`, { auth: true }),
     createLoadRequest: (game, amount, method, screenshot) =>
       request(`/players/${pid()}/load-requests`, { method: "POST", auth: true, body: { game, amount, method, screenshot } }),
+    // Link an existing game account (staff confirm)
+    linkSettings: () => request("/link-settings"),
+    linkRequests: () => request(`/players/${pid()}/link-requests`, { auth: true }),
+    createLinkRequest: (game, game_username) =>
+      request(`/players/${pid()}/link-requests`, { method: "POST", auth: true, body: { game, game_username } }),
     // Profile photo
     getAvatar: () => request(`/players/${pid()}/avatar`, { auth: true }),
     setAvatar: (avatar) => request(`/players/${pid()}/avatar`, { method: "POST", auth: true, body: { avatar } }),

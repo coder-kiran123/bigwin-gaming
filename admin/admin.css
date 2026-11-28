@@ -1331,3 +1331,13 @@ a.kpi:hover { box-shadow: 0 4px 16px rgba(0,0,0,.06); transform: translateY(-1px
 .switch input:checked + span::before { transform: translateX(20px); }
 .lr-btn--auto { background: #1f2937; color: #fde68a; }
 @media (max-width: 768px) { .lr-side { flex-wrap: wrap; } .lr-btn--auto { flex-basis: 100%; } }
+
+/* Game ID Links */
+.gl-direct { margin: 4px 0 14px; border: 1px dashed var(--border); border-radius: 12px; padding: 10px 14px; }
+.gl-direct summary { cursor: pointer; font-weight: 700; font-size: 14px; }
+.gl-form { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 8px; margin-top: 12px; align-items: center; }
+.gl-form input, .gl-form select { border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 14px; background: #fff; color: var(--text); min-width: 0; }
+.gl-actions { display: flex; gap: 6px; }
+.gl-form .gl-out { grid-column: 1 / -1; }
+#page-game-links .auto-switch { margin-bottom: 8px; }
+@media (max-width: 768px) { .gl-form { grid-template-columns: 1fr; } .gl-actions .lr-btn { flex: 1; } }
