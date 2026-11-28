@@ -158,6 +158,7 @@ function showPage(pageId, clickedEl) {
     'load-requests':      'Load Requests',
     'game-links':         'Game ID Links',
     'accounts':           'Player Accounts',
+    'support-agents':     'Support Agents',
     'referrals':          'Referral Program',
   };
   document.getElementById('pageTitle').textContent = titles[pageId] || pageId;
@@ -184,9 +185,9 @@ function showPage(pageId, clickedEl) {
   if (pageId === 'payment-methods')    { renderPaymentMethods(); renderKeyhubConfig(); renderSmsConfig(); renderTelegramConfig(); renderEmailConfig(); renderSocialLinks(); }
   if (pageId === 'cashout-rules')      renderCashoutRules();
   if (pageId === 'support-chat')        { loadConversations(); }
-  if (pageId === 'load-requests')       renderLoadRequests();
+  if (pageId === 'load-requests')       { renderLoadRequests(); if (isAgent()) renderTelegramCard(); }
   if (pageId === 'game-links')          renderGameLinks();
-  if (pageId === 'support-agents')      { renderSupportAgents(); }
+  if (pageId === 'support-agents')      { renderSupportAgents(); renderAgentsTelegramSwitch(); }
   if (pageId === 'referrals')          { loadReferrals(); }
   if (pageId === 'roulette-admin')     { loadRoulettePrizes(); loadRouletteSpins(); }
   if (pageId === 'marketplace-admin')  { loadMarketplaceTiers(); loadMarketplaceRedemptions(); }
@@ -1931,6 +1932,67 @@ async function setAutoLoad(on) {
   const res = await apiFetch('/admin/auto-load', 'POST', { enabled: on });
   if (!res.success) alert(res.msg || 'Could not change the setting');
   renderLoadRequests();
+}
+
+// ── TELEGRAM for support agents (each agent connects their own Telegram) ──
+async function renderTelegramCard() {
+  const card = document.getElementById('tgCard');
+  if (!card) return;
+  const res = await apiFetch('/staff/telegram');
+  if (!res.success) { card.style.display = 'none'; return; }
+  const d = res.data;
+  card.style.display = '';
+  if (!d.enabled || !d.bot_ready) {
+    card.innerHTML = `<span class="tg-ico">✈️</span><div><strong>Telegram</strong>
+      <div class="lr-sub">${!d.enabled ? 'The admin has turned off Telegram for support agents.' : 'The admin has not set up the Telegram bot yet.'}</div></div>`;
+    return;
+  }
+  card.innerHTML = d.connected
+    ? `<span class="tg-ico">✈️</span><div style="flex:1"><strong>Telegram connected</strong> <span class="auto-state on">${lrEsc(d.telegram_name || 'ON')}</span>
+         <div class="lr-sub">New loads, link requests and player messages arrive in your Telegram. Type /help there.</div></div>
+       <button class="lr-btn lr-btn--no" onclick="disconnectTelegram_agent()">Disconnect</button>`
+    : `<span class="tg-ico">✈️</span><div style="flex:1"><strong>Work from Telegram</strong>
+         <div class="lr-sub">Get alerts and load, link and reset passwords from your phone's Telegram.</div></div>
+       <button class="lr-btn lr-btn--ok" onclick="connectTelegram_agent(this)">Connect Telegram</button>`;
+}
+
+async function connectTelegram_agent(btn) {
+  btn.disabled = true;
+  const res = await apiFetch('/staff/telegram/connect', 'POST', {});
+  btn.disabled = false;
+  if (!res.success) return alert(res.msg || 'Could not start');
+  const d = res.data;
+  if (d.url) window.open(d.url, '_blank', 'noopener');
+  document.getElementById('tgCard').insertAdjacentHTML('beforeend',
+    `<div class="lr-sub tg-hint">Telegram opened — tap <strong>Start</strong> there. ${d.url ? `Didn't open? <a href="${lrEsc(d.url)}" target="_blank" rel="noopener">Open the bot</a>` : ''}
+     Or send <code>/start ${lrEsc(d.code)}</code> to ${d.bot ? '@' + lrEsc(d.bot) : 'the bot'} (valid 15 minutes).
+     <a href="#" onclick="renderTelegramCard();return false">I've tapped Start ↻</a></div>`);
+}
+
+async function disconnectTelegram_agent() {
+  if (!confirm('Stop getting alerts in Telegram?')) return;
+  await apiFetch('/staff/telegram/disconnect', 'POST', {});
+  renderTelegramCard();
+}
+
+// Admin: allow agents on Telegram + who is connected
+async function renderAgentsTelegramSwitch() {
+  const res = await apiFetch('/admin/agents-telegram');
+  if (!res.success) return;
+  const d = res.data;
+  document.getElementById('agentsTgToggle').checked = d.enabled;
+  const st = document.getElementById('agentsTgState');
+  st.textContent = d.enabled ? 'ON' : 'OFF'; st.classList.toggle('on', d.enabled);
+  const info = document.getElementById('agentsTgInfo');
+  info.innerHTML = (d.connected.length
+    ? 'Connected: ' + d.connected.map(a => `<strong>${lrEsc(a.name)}</strong>${a.telegram ? ' (' + lrEsc(a.telegram) + ')' : ''}`).join(', ') + '. '
+    : 'No agents connected yet. ') +
+    'Agents connect from Load Requests → Connect Telegram. Deactivating an agent also stops their Telegram.';
+}
+async function setAgentsTelegram(on) {
+  const res = await apiFetch('/admin/agents-telegram', 'POST', { enabled: on });
+  if (!res.success) alert(res.msg || 'Could not save');
+  renderAgentsTelegramSwitch();
 }
 
 // ── PLAYER ACCOUNTS for support agents (create account / reset password) ──

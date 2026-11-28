@@ -4574,8 +4574,9 @@ def _tg_after_request(response):
                 out = _tg_build(c)
                 if out:
                     cfg = _tg.get_config()
-                    if cfg['token'] and cfg['chats'] and out[0] in cfg['events']:
-                        sent, _ = _tg.send_tracked(out[1], cfg['token'], cfg['chats'])
+                    token, chats = _tg_staff_chats(out[0])
+                    if token and chats:
+                        sent, _ = _tg.send_tracked(out[1], token, chats)
                         if len(out) > 2 and sent:
                             _tg_remember(sent, out[2])
             except Exception as ex:
@@ -4637,23 +4638,58 @@ def _lr_tg_text(r, method_name=''):
             + ("\n📎 Receipt attached in Live Support" if r.get('screenshot') else ''))
 
 
-def _lr_buttons(rid):
-    return {'inline_keyboard': [[{'text': '✅ Loaded', 'callback_data': f'lr:{rid}:loaded'},
-                                 {'text': '❌ Reject', 'callback_data': f'lr:{rid}:reject'}]]}
+def _lr_buttons(rid, auto=False):
+    row = [{'text': '✅ Loaded', 'callback_data': f'lr:{rid}:loaded'},
+           {'text': '❌ Reject', 'callback_data': f'lr:{rid}:reject'}]
+    if auto:
+        row.insert(0, {'text': '⚡ Auto-load', 'callback_data': f'lr:{rid}:auto'})
+    return {'inline_keyboard': [row]}
+
+
+def _lr_auto_possible(r):
+    """⚡ makes sense: admin switched it on, the game is connected and the player has a Game ID there."""
+    db = get_db()
+    try:
+        return bool(_auto_load_on(db) and r['game'] in _auto_ready_games(db) and db.execute(
+            'SELECT 1 FROM game_accounts WHERE player_id=? AND game=?', (r['player_id'], r['game'])).fetchone())
+    finally:
+        db.close()
+
+
+def _tg_agent_chats():
+    """Private Telegram chats of connected, active support agents (when the admin allows it)."""
+    db = get_db()
+    try:
+        if not _setting_on(db, 'agents_telegram', True):
+            return []
+        return [r['telegram_id'] for r in db.execute(
+            "SELECT telegram_id FROM support_agents WHERE active=1 AND telegram_id<>''").fetchall()]
+    finally:
+        db.close()
+
+
+def _tg_staff_chats(category):
+    """Admin chats (when that alert type is on) + connected agents (for support work)."""
+    cfg = _tg.get_config()
+    chats = list(cfg['chats']) if category in cfg['events'] else []
+    if category in ('support', 'money'):
+        chats += [c for c in _tg_agent_chats() if c not in chats]
+    return cfg['token'], chats
 
 
 def _lr_notify(r, method_name):
-    """Telegram alert with Loaded / Reject buttons (background; never slows the player down)."""
+    """Telegram alert with Loaded / Reject (/ ⚡) buttons (background; never slows the player down)."""
     def run():
         try:
-            cfg = _tg.get_config()
-            if not (cfg['token'] and cfg['chats'] and 'money' in cfg['events']):
+            token, chats = _tg_staff_chats('money')
+            if not (token and chats):
                 return
-            for chat in cfg['chats']:
+            auto = _lr_auto_possible(r)
+            for chat in chats:
                 try:
-                    m = _tg.api(cfg['token'], 'sendMessage', {
+                    m = _tg.api(token, 'sendMessage', {
                         'chat_id': chat, 'text': _lr_tg_text(r, method_name), 'parse_mode': 'HTML',
-                        'reply_markup': _lr_buttons(r['id'])})
+                        'reply_markup': _lr_buttons(r['id'], auto)})
                     # Replying to the alert in Telegram also answers the player in their chat
                     _tg_remember([(str(chat), m['message_id'])],
                                  {'username': r['username'], 'agent': r['agent'], 'player_id': r['player_id']})
@@ -4829,31 +4865,27 @@ def admin_auto_load():
         db.close()
 
 
-@app.route('/api/staff/load-requests/<int:rid>/auto', methods=['POST'])
-def staff_auto_load(rid):
-    """Add the credits through the game's backend (no player wallet involved — they paid outside),
-    then finish the request like a manual 'Loaded'."""
-    by = _staff_name()
-    if not by:
-        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+def _lr_auto(rid, by):
+    """⚡ Add the credits through the game's backend (no wallet — the player paid outside), then mark it
+    Loaded like a manual tap. Returns (ok, message)."""
     db = get_db()
     try:
         if not _auto_load_on(db):
-            return err('Auto-load is turned off by the admin.')
+            return False, 'Auto-load is turned off by the admin.'
         # Claim it first so a manual tap or a second ⚡ can't load it twice
         claim = db.execute("UPDATE load_requests SET status='loading' WHERE id=? AND status='pending'", (rid,))
         db.commit()
         row = db.execute('SELECT * FROM load_requests WHERE id=?', (rid,)).fetchone()
         if not row:
-            return err('Load request not found', 404)
+            return False, 'Load request not found'
         r = dict(row)
         if claim.rowcount == 0:
-            return err(f"Already {r['status']}" + (f" by {r['handled_by']}" if r['handled_by'] else ''))
+            return False, f"Already {r['status']}" + (f" by {r['handled_by']}" if r['handled_by'] else '')
 
         def release(msg):
             db.execute("UPDATE load_requests SET status='pending' WHERE id=? AND status='loading'", (rid,))
             db.commit()
-            return err(msg)
+            return False, msg
 
         brow = db.execute("SELECT * FROM backends WHERE game=? AND status='connected' AND enabled=1 "
                           "ORDER BY created_at DESC LIMIT 1", (r['game'],)).fetchone()
@@ -4875,7 +4907,16 @@ def staff_auto_load(rid):
     finally:
         db.close()
     done, msg, _r = _lr_finish(rid, 'loaded', f'{by} (auto)', from_status='loading')
-    return ok(msg='⚡ Loaded automatically — the player was told in chat') if done else err(msg)
+    return (True, '⚡ Loaded automatically — the player was told in chat') if done else (False, msg)
+
+
+@app.route('/api/staff/load-requests/<int:rid>/auto', methods=['POST'])
+def staff_auto_load(rid):
+    by = _staff_name()
+    if not by:
+        return jsonify({'success': False, 'msg': 'Staff only'}), 401
+    done, msg = _lr_auto(rid, by)
+    return ok(msg=msg) if done else err(msg)
 
 
 # ─────────────────────────────────────────
@@ -4995,8 +5036,9 @@ def player_link_requests(pid):
                    (pid, prow['username'], agent, 'player',
                     f'🔗 Link request #{rid}\nGame: {_gname(game)}\nMy username there: {gu}'))
         db.commit()
-        _tg.notify('support', f"🔗 <b>Link request #{rid}</b>\nPlayer: <b>{_e(prow['username'])}</b>\n"
-                              f"{_e(_gname(game))} username: <code>{_e(gu)}</code>\n<i>Check it in admin → Game ID Links.</i>")
+        _tg_send_buttons('support', _gl_tg_text({'id': rid, 'username': prow['username'], 'game': game,
+                                                 'game_username': gu}), _gl_buttons(rid),
+                         {'username': prow['username'], 'agent': agent, 'player_id': pid})
         return ok({'id': rid}, "Sent! Support will check it and link it — you'll get a message in Chats.")
     finally:
         db.close()
@@ -5042,40 +5084,37 @@ def staff_link_check():
     return ok({'checked': checked, 'exists': exists, 'balance': bal}, msg)
 
 
-@app.route('/api/staff/link-requests/<int:rid>/<action>', methods=['POST'])
-def staff_finish_link(rid, action):
-    by = _can_link()
-    if not by:
-        return _deny('Only the admin can link accounts right now.')
+def _link_finish(rid, action, by, note=''):
+    """Approve (after checking the panel when connected) or reject a link request. Returns (ok, message)."""
     if action not in ('approve', 'reject'):
-        return err('Unknown action', 404)
-    note = str((request.get_json(silent=True) or {}).get('note') or '').strip()[:300]
+        return False, 'Unknown action'
+    note = (note or '').strip()[:300]
     db = get_db()
     try:
         row = db.execute("SELECT * FROM link_requests WHERE id=?", (rid,)).fetchone()
         if not row:
-            return err('Link request not found', 404)
+            return False, 'Link request not found'
         r = dict(row)
         if r['status'] != 'pending':
-            return err(f"Already {r['status']} by {r['handled_by'] or 'someone'}")
+            return False, f"Already {r['status']} by {r['handled_by'] or 'someone'}"
         game = _gname(r['game'])
         if action == 'approve':
             checked, exists, _bal, msg = _panel_lookup(db, r['game'], r['game_username'])
             if checked and not exists:
-                return err(msg + ' — fix the username or reject the request.')
+                return False, msg + ' — fix the username or reject the request.'
         # Claim it first so two staff can't both handle it
         cur = db.execute("UPDATE link_requests SET status=?, handled_by=?, note=?, handled_at=? WHERE id=? AND status='pending'",
                          ('approved' if action == 'approve' else 'rejected', by, note,
                           datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), rid))
         db.commit()
         if cur.rowcount == 0:
-            return err('Someone else just handled this request.')
+            return False, 'Someone else just handled this request.'
         if action == 'approve':
             problem = _do_link(db, r['player_id'], r['game'], r['game_username'])
             if problem:
                 db.execute("UPDATE link_requests SET status='pending', handled_by='', handled_at='' WHERE id=?", (rid,))
                 db.commit()
-                return err(problem)
+                return False, problem
             text = f"✅ Your {game} account {r['game_username']} is now linked. You can load and cash out from the Payments tab."
         else:
             text = (f"❌ We couldn't link {game} account {r['game_username']}."
@@ -5083,35 +5122,39 @@ def staff_finish_link(rid, action):
         db.execute('INSERT INTO support_messages (player_id, username, agent, sender, message) VALUES (?,?,?,?,?)',
                    (r['player_id'], r['username'], _get_available_agent(db), 'agent', text))
         db.commit()
-        return ok(msg=('Linked — the player was told in chat' if action == 'approve' else 'Rejected — the player was told in chat'))
+        return True, ('Linked — the player was told in chat' if action == 'approve' else 'Rejected — the player was told in chat')
     finally:
         db.close()
 
 
-@app.route('/api/staff/link-direct', methods=['POST'])
-def staff_link_direct():
-    """Staff link an existing panel username to a website account without a request."""
+@app.route('/api/staff/link-requests/<int:rid>/<action>', methods=['POST'])
+def staff_finish_link(rid, action):
     by = _can_link()
     if not by:
         return _deny('Only the admin can link accounts right now.')
-    data = request.get_json(silent=True) or {}
-    who  = str(data.get('player') or '').strip()
-    game = str(data.get('game') or '').strip().lower()
-    gu   = str(data.get('game_username') or '').strip()
+    if action not in ('approve', 'reject'):
+        return err('Unknown action', 404)
+    done, msg = _link_finish(rid, action, by, (request.get_json(silent=True) or {}).get('note') or '')
+    return ok(msg=msg) if done else err(msg)
+
+
+def _link_direct(who, game, gu, by):
+    """Link an existing panel username to a website account (email or username). Returns (ok, message)."""
+    who, game, gu = (who or '').strip(), (game or '').strip().lower(), (gu or '').strip()
     if not who or not _GAME_KEY.match(game) or not _GAME_USER.match(gu):
-        return err('Enter the website account, pick a game and enter the game username.')
+        return False, 'Enter the website account, pick a game and enter the game username.'
     db = get_db()
     try:
         prow = db.execute('SELECT id, username FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
                           (who, who)).fetchone()
         if not prow:
-            return err(f'No website account "{who}" — use their email or username.')
+            return False, f'No website account "{who}" — use their email or username.'
         checked, exists, _bal, msg = _panel_lookup(db, game, gu)
         if checked and not exists:
-            return err(msg)
+            return False, msg
         problem = _do_link(db, prow['id'], game, gu)
         if problem:
-            return err(problem)
+            return False, problem
         # Close any waiting request for this game: approved if it was this username, otherwise superseded
         now_s = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         db.execute("UPDATE link_requests SET status='approved', handled_by=?, handled_at=? "
@@ -5124,9 +5167,21 @@ def staff_link_direct():
                    (prow['id'], prow['username'], _get_available_agent(db), 'agent',
                     f"✅ Your {_gname(game)} account {gu} is now linked to this website account."))
         db.commit()
-        return ok(msg=f"Linked {gu} ({_gname(game)}) to {prow['username']}" + ('' if checked else ' — not checked on a panel'))
+        return True, f"Linked {gu} ({_gname(game)}) to {prow['username']}" + ('' if checked else ' — not checked on a panel')
     finally:
         db.close()
+
+
+@app.route('/api/staff/link-direct', methods=['POST'])
+def staff_link_direct():
+    """Staff link an existing panel username to a website account without a request."""
+    by = _can_link()
+    if not by:
+        return _deny('Only the admin can link accounts right now.')
+    data = request.get_json(silent=True) or {}
+    done, msg = _link_direct(str(data.get('player') or ''), str(data.get('game') or ''),
+                             str(data.get('game_username') or ''), by)
+    return ok(msg=msg) if done else err(msg)
 
 
 # ─────────────────────────────────────────
@@ -5186,44 +5241,20 @@ def admin_agent_permissions():
         db.close()
 
 
-@app.route('/api/staff/players', methods=['GET', 'POST'])
-def staff_players():
-    by = _can_manage_players()
-    if not by:
-        return _deny('Only the admin can manage player accounts right now.')
+def _create_account(email, first, last, pw, by):
+    """Create a website account like a normal sign-up. Returns (ok, message, data)."""
+    email = (email or '').strip().lower()
+    first, last = (first or '').strip()[:60], (last or '').strip()[:60]
+    pw = (pw or '').strip() or _temp_password()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return False, 'Enter a valid email address.', None
+    if len(pw) < 6:
+        return False, 'Password must be at least 6 characters.', None
     db = get_db()
     try:
-        if request.method == 'GET':
-            q = request.args.get('q', '').strip().lower()[:80]
-            if q:
-                like = f'%{q}%'
-                rows = db.execute(
-                    "SELECT id, username, email, first_name, last_name, status, created_at FROM players "
-                    "WHERE LOWER(username) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? "
-                    "OR LOWER(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) LIKE ? "
-                    "ORDER BY id DESC LIMIT 50", (like, like, like)).fetchall()
-            else:
-                rows = db.execute("SELECT id, username, email, first_name, last_name, status, created_at FROM players "
-                                  "ORDER BY id DESC LIMIT 50").fetchall()
-            out = rows_to_list(rows)
-            for p in out:
-                p['games'] = [g['game'] for g in db.execute('SELECT game FROM game_accounts WHERE player_id=?',
-                                                             (p['id'],)).fetchall()]
-            return ok(out)
-
-        # Create a website account (same rules as signing up on the site)
-        data  = request.get_json(silent=True) or {}
-        email = str(data.get('email') or '').strip().lower()
-        first = str(data.get('first_name') or '').strip()[:60]
-        last  = str(data.get('last_name') or '').strip()[:60]
-        pw    = str(data.get('password') or '').strip() or _temp_password()
-        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
-            return err('Enter a valid email address.')
-        if len(pw) < 6:
-            return err('Password must be at least 6 characters.')
         if db.execute('SELECT 1 FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
                       (email, email)).fetchone():
-            return err('That email already has an account — use Reset password instead.')
+            return False, 'That email already has an account — use Reset password instead.', None
         cur = db.execute(
             'INSERT INTO players (username, email, password_hash, fp_credits, referral_code, first_name, last_name, '
             'referred_by_name) VALUES (?,?,?,?,?,?,?,?)',
@@ -5234,8 +5265,64 @@ def staff_players():
         db.close()
     if by != 'Admin':
         _staff_note(f'👤 {_e(by)} created website account <b>{_e(email)}</b>')
-    return ok({'id': pid, 'username': email, 'password': pw},
-              f'Account created — give the player their email and password: {pw}')
+    return True, f'Account created — give the player their email and password: {pw}', {'id': pid, 'username': email, 'password': pw}
+
+
+def _reset_password(pid, pw, by):
+    """Give a player a new password (random when empty). Returns (ok, message, data)."""
+    pw = (pw or '').strip() or _temp_password()
+    if len(pw) < 6:
+        return False, 'Password must be at least 6 characters.', None
+    db = get_db()
+    try:
+        row = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
+        if not row:
+            return False, 'Player not found', None
+        db.execute('UPDATE players SET password_hash=? WHERE id=?', (hash_password(pw), pid))
+        db.commit()
+    finally:
+        db.close()
+    if by != 'Admin':
+        _staff_note(f'🔑 {_e(by)} reset the password for <b>{_e(row["username"])}</b>')
+    return True, f'New password for {row["username"]}: {pw}', {'password': pw, 'username': row['username']}
+
+
+def _find_players(q, limit=50):
+    q = (q or '').strip().lower()[:80]
+    db = get_db()
+    try:
+        if q:
+            like = f'%{q}%'
+            rows = db.execute(
+                "SELECT id, username, email, first_name, last_name, status, created_at FROM players "
+                "WHERE LOWER(username) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? "
+                "OR LOWER(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) LIKE ? "
+                "ORDER BY id DESC LIMIT ?", (like, like, like, limit)).fetchall()
+        else:
+            rows = db.execute("SELECT id, username, email, first_name, last_name, status, created_at FROM players "
+                              "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        out = rows_to_list(rows)
+        for p in out:
+            p['games'] = [g['game'] for g in db.execute('SELECT game FROM game_accounts WHERE player_id=?',
+                                                         (p['id'],)).fetchall()]
+            p['game_ids'] = {g['game']: g['game_username'] for g in db.execute(
+                'SELECT game, game_username FROM game_accounts WHERE player_id=?', (p['id'],)).fetchall()}
+        return out
+    finally:
+        db.close()
+
+
+@app.route('/api/staff/players', methods=['GET', 'POST'])
+def staff_players():
+    by = _can_manage_players()
+    if not by:
+        return _deny('Only the admin can manage player accounts right now.')
+    if request.method == 'GET':
+        return ok(_find_players(request.args.get('q', '')))
+    data = request.get_json(silent=True) or {}
+    done, msg, out = _create_account(str(data.get('email') or ''), str(data.get('first_name') or ''),
+                                     str(data.get('last_name') or ''), str(data.get('password') or ''), by)
+    return ok(out, msg) if done else err(msg)
 
 
 @app.route('/api/staff/players/<int:pid>/reset-password', methods=['POST'])
@@ -5243,21 +5330,8 @@ def staff_reset_player_password(pid):
     by = _can_manage_players()
     if not by:
         return _deny('Only the admin can reset passwords right now.')
-    pw = str((request.get_json(silent=True) or {}).get('new_password') or '').strip() or _temp_password()
-    if len(pw) < 6:
-        return err('Password must be at least 6 characters.')
-    db = get_db()
-    try:
-        row = db.execute('SELECT username FROM players WHERE id=?', (pid,)).fetchone()
-        if not row:
-            return err('Player not found', 404)
-        db.execute('UPDATE players SET password_hash=? WHERE id=?', (hash_password(pw), pid))
-        db.commit()
-    finally:
-        db.close()
-    if by != 'Admin':
-        _staff_note(f'🔑 {_e(by)} reset the password for <b>{_e(row["username"])}</b>')
-    return ok({'password': pw}, f'New password for {row["username"]}: {pw}')
+    done, msg, out = _reset_password(pid, str((request.get_json(silent=True) or {}).get('new_password') or ''), by)
+    return ok(out, msg) if done else (err(msg, 404) if msg == 'Player not found' else err(msg))
 
 
 @app.route('/api/staff/dashboard', methods=['GET'])
@@ -5319,6 +5393,349 @@ def staff_finish_load(rid, action):
     return ok(msg=msg) if done else err(msg)
 
 
+# ─────────────────────────────────────────
+#  SUPPORT AGENTS ON TELEGRAM
+#  Each agent connects their own Telegram (one-time code), then gets alerts with buttons
+#  and can use /loads /links /find /newaccount /resetpw /link in a private chat with the bot.
+# ─────────────────────────────────────────
+def _gl_tg_text(r):
+    return (f"🔗 <b>Link request #{r['id']}</b>\nPlayer: <b>{_e(r['username'])}</b>\n"
+            f"{_e(_gname(r['game']))} username: <code>{_e(r['game_username'])}</code>")
+
+
+def _gl_buttons(rid):
+    return {'inline_keyboard': [[{'text': '🔍 Check', 'callback_data': f'gl:{rid}:check'},
+                                 {'text': '✅ Approve', 'callback_data': f'gl:{rid}:approve'},
+                                 {'text': '❌ Reject', 'callback_data': f'gl:{rid}:reject'}]]}
+
+
+def _tg_send(token, chat, text, markup=None, reply_to=None):
+    payload = {'chat_id': chat, 'text': text[:4000], 'parse_mode': 'HTML', 'disable_web_page_preview': True}
+    if markup:
+        payload['reply_markup'] = markup
+    if reply_to:
+        payload['reply_parameters'] = {'message_id': reply_to, 'allow_sending_without_reply': True}
+    return _tg.api(token, 'sendMessage', payload)
+
+
+def _tg_send_buttons(category, text, markup, link=None):
+    """Background send to admin chats + connected agents; replies to it reach the player when `link` is set."""
+    def run():
+        try:
+            token, chats = _tg_staff_chats(category)
+            for chat in chats if token else []:
+                try:
+                    m = _tg_send(token, chat, text, markup)
+                    if link:
+                        _tg_remember([(str(chat), m['message_id'])], link)
+                except Exception as ex:
+                    print(f'[telegram] {ex}')
+        except Exception as ex:
+            print(f'[telegram] {ex}')
+    _threading.Thread(target=run, daemon=True).start()
+
+
+def _tg_bot_username(token):
+    db = get_db()
+    try:
+        row = db.execute("SELECT value FROM site_settings WHERE key='telegram_bot_username'").fetchone()
+        if row and row['value']:
+            return row['value']
+        try:
+            name = (_tg.api(token, 'getMe', {}) or {}).get('username', '')
+        except Exception:
+            name = ''
+        if name:
+            _upsert_setting(db, 'telegram_bot_username', name)
+        return name
+    finally:
+        db.close()
+
+
+def _tg_actor(chat_id, user):
+    """Who is acting from Telegram: (name, can_link, can_manage_players) or None for strangers.
+    Admin chats (set in Telegram settings) have full access; agents only in their own private chat."""
+    cfg = _tg.get_config()
+    first = (user or {}).get('first_name') or 'Telegram'
+    if chat_id in cfg['chats']:
+        return f'{first} (Telegram)', True, True
+    db = get_db()
+    try:
+        if not _setting_on(db, 'agents_telegram', True):
+            return None
+        row = db.execute("SELECT name FROM support_agents WHERE active=1 AND telegram_id=? AND telegram_id<>''",
+                         (chat_id,)).fetchone()
+        if not row:
+            return None
+        return (f"{row['name']} (Telegram)", _setting_on(db, 'link_agents_enabled', True),
+                _setting_on(db, 'agents_manage_players', True))
+    finally:
+        db.close()
+
+
+def _tg_find_game(word):
+    w = re.sub(r'[^a-z0-9]', '', (word or '').lower())
+    for k, v in _GAME_NAMES.items():
+        if w in (k, re.sub(r'[^a-z0-9]', '', v.lower())):
+            return k
+    return ''
+
+
+_TG_HELP = ("🤖 <b>BigWin support bot</b>\n"
+            "/loads — loads waiting (with buttons)\n"
+            "/links — Game ID link requests\n"
+            "/find <i>email or name</i> — look up a player\n"
+            "/newaccount <i>email First Last</i> — create a website account\n"
+            "/resetpw <i>email</i> — give a player a new password\n"
+            "/link <i>email game username</i> — link an existing game account\n"
+            "<b>Reply</b> to a 💬 player message to answer them in their chat.")
+
+
+def _tg_command(token, chat_id, text, actor, reply_to):
+    """Slash commands from admin chats or a connected agent. Returns the reply text (or '' if handled)."""
+    by, can_link, can_players = actor
+    cmd, _, rest = text.partition(' ')
+    cmd = cmd.split('@')[0].lower()
+    rest = rest.strip()
+    if cmd in ('/start', '/help'):
+        return _TG_HELP
+    if cmd == '/loads':
+        db = get_db()
+        try:
+            rows = [dict(r) for r in db.execute(
+                "SELECT * FROM load_requests WHERE status='pending' ORDER BY id ASC LIMIT 10").fetchall()]
+            names = {m['key']: m['name'] for m in db.execute('SELECT key, name FROM payment_methods').fetchall()}
+        finally:
+            db.close()
+        if not rows:
+            return '🎉 No loads waiting.'
+        for r in rows:
+            m = _tg_send(token, chat_id, _lr_tg_text(r, names.get(r['method'], r['method'])),
+                         _lr_buttons(r['id'], _lr_auto_possible(r)))
+            _tg_remember([(chat_id, m['message_id'])], {'username': r['username'], 'agent': r['agent'], 'player_id': r['player_id']})
+        return ''
+    if cmd == '/links':
+        db = get_db()
+        try:
+            rows = [dict(r) for r in db.execute(
+                "SELECT * FROM link_requests WHERE status='pending' ORDER BY id ASC LIMIT 10").fetchall()]
+        finally:
+            db.close()
+        if not rows:
+            return '🎉 No link requests waiting.'
+        for r in rows:
+            _tg_send(token, chat_id, _gl_tg_text(r), _gl_buttons(r['id']) if can_link else None)
+        return '' if can_link else 'ℹ️ Only the admin can approve links right now.'
+    if cmd == '/find':
+        if not can_players:
+            return 'ℹ️ Only the admin can look up player accounts right now.'
+        if not rest:
+            return 'Usage: /find <i>email or name</i>'
+        found = _find_players(rest, 5)
+        if not found:
+            return f'No players match “{_e(rest)}”.'
+        for pl in found:
+            ids = ', '.join(f"{_gname(g)} <code>{_e(u)}</code>" for g, u in pl['game_ids'].items()) or 'no Game IDs'
+            name = ' '.join(x for x in (pl['first_name'], pl['last_name']) if x)
+            _tg_send(token, chat_id,
+                     f"👤 <b>{_e(pl['email'] or pl['username'])}</b>{' · ' + _e(name) if name else ''}\n"
+                     f"Joined {_e((pl['created_at'] or '')[:10])} · {ids}"
+                     + ('' if (pl['status'] or 'active') == 'active' else '\n⛔ disabled'),
+                     {'inline_keyboard': [[{'text': '🔑 Reset password', 'callback_data': f"pw:{pl['id']}"}]]})
+        return ''
+    if cmd == '/newaccount':
+        if not can_players:
+            return 'ℹ️ Only the admin can create accounts right now.'
+        parts = rest.split()
+        if not parts:
+            return 'Usage: /newaccount <i>email First Last</i>'
+        done, msg, out = _create_account(parts[0], parts[1] if len(parts) > 1 else '',
+                                         ' '.join(parts[2:]), '', by)
+        return (f"✅ Account created\nLogin: <code>{_e(out['username'])}</code>\nPassword: <code>{_e(out['password'])}</code>"
+                if done else f'❌ {_e(msg)}')
+    if cmd == '/resetpw':
+        if not can_players:
+            return 'ℹ️ Only the admin can reset passwords right now.'
+        if not rest:
+            return 'Usage: /resetpw <i>email</i>'
+        db = get_db()
+        try:
+            row = db.execute('SELECT id FROM players WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)',
+                             (rest, rest)).fetchone()
+        finally:
+            db.close()
+        if not row:
+            return f'No website account “{_e(rest)}” — try /find.'
+        done, msg, out = _reset_password(row['id'], '', by)
+        return (f"🔑 New password for <code>{_e(out['username'])}</code>: <code>{_e(out['password'])}</code>"
+                if done else f'❌ {_e(msg)}')
+    if cmd == '/link':
+        if not can_link:
+            return 'ℹ️ Only the admin can link accounts right now.'
+        parts = rest.split()
+        if len(parts) < 3:
+            return 'Usage: /link <i>email game username</i>  (e.g. /link sam@mail.com juwa sam123)'
+        game = _tg_find_game(parts[1])
+        if not game:
+            return f'Unknown game “{_e(parts[1])}”.'
+        done, msg = _link_direct(parts[0], game, parts[2], by)
+        return ('✅ ' if done else '❌ ') + _e(msg)
+    return 'Unknown command. /help'
+
+
+def _tg_callback(token, cq, actor):
+    """Inline buttons: lr:<id>:loaded|reject|auto, gl:<id>:check|approve|reject, pw:<player id>."""
+    by, can_link, can_players = actor
+    cmsg = cq.get('message') or {}
+    chat, mid = str((cmsg.get('chat') or {}).get('id', '')), cmsg.get('message_id')
+    parts = str(cq.get('data') or '').split(':')
+    edit = lambda text: _tg.api(token, 'editMessageText', {'chat_id': chat, 'message_id': mid,
+                                                           'parse_mode': 'HTML', 'text': text[:4000]})
+    if parts[0] == 'lr' and len(parts) == 3 and parts[1].isdigit() and parts[2] in ('loaded', 'reject', 'auto'):
+        rid = int(parts[1])
+        if parts[2] == 'auto':
+            done, reply = _lr_auto(rid, by)
+            row = _tg_row('SELECT * FROM load_requests WHERE id=?', (rid,))
+        else:
+            done, reply, row = _lr_finish(rid, parts[2], by)
+        if row and row.get('status') in ('loaded', 'rejected'):
+            verdict = ('✅ <b>Loaded</b>' if row['status'] == 'loaded' else '❌ <b>Rejected</b>') + f" by {_e(row['handled_by'])}"
+            try:
+                edit(_lr_tg_text(row) + '\n\n' + verdict)
+            except Exception as ex:
+                print(f'[telegram] edit: {ex}')
+        return reply
+    if parts[0] == 'gl' and len(parts) == 3 and parts[1].isdigit() and parts[2] in ('check', 'approve', 'reject'):
+        rid = int(parts[1])
+        row = _tg_row('SELECT * FROM link_requests WHERE id=?', (rid,))
+        if not row:
+            return 'Link request not found'
+        if parts[2] == 'check':
+            db = get_db()
+            try:
+                return _panel_lookup(db, row['game'], row['game_username'])[3]
+            finally:
+                db.close()
+        if not can_link:
+            return 'Only the admin can link accounts right now.'
+        done, reply = _link_finish(rid, 'approve' if parts[2] == 'approve' else 'reject', by)
+        row = _tg_row('SELECT * FROM link_requests WHERE id=?', (rid,))
+        if row.get('status') in ('approved', 'rejected'):
+            try:
+                edit(_gl_tg_text(row) + f"\n\n{'✅ <b>Linked</b>' if row['status'] == 'approved' else '❌ <b>Rejected</b>'} by {_e(row['handled_by'])}")
+            except Exception as ex:
+                print(f'[telegram] edit: {ex}')
+        return reply
+    if parts[0] == 'pw' and len(parts) == 2 and parts[1].isdigit():
+        if not can_players:
+            return 'Only the admin can reset passwords right now.'
+        done, reply, out = _reset_password(int(parts[1]), '', by)
+        if done:
+            _tg_send(token, chat, f"🔑 New password for <code>{_e(out['username'])}</code>: <code>{_e(out['password'])}</code>",
+                     reply_to=mid)
+            return 'New password sent'
+        return reply
+    return 'Unknown button'
+
+
+def _tg_try_connect(token, msg):
+    """'/start <code>' in a private chat links that Telegram account to a support agent."""
+    text = (msg.get('text') or '').strip()
+    chat = msg.get('chat') or {}
+    if chat.get('type') != 'private' or not text.startswith('/start '):
+        return False
+    code = text.split(' ', 1)[1].strip().upper()
+    if not re.match(r'^[A-Z0-9]{6,12}$', code):
+        return False
+    db = get_db()
+    try:
+        row = db.execute('SELECT value FROM site_settings WHERE key=?', (f'tglink_{code}',)).fetchone()
+        db.execute('DELETE FROM site_settings WHERE key=?', (f'tglink_{code}',))
+        db.commit()
+        agent, _, exp = (row['value'] if row else '').partition('|')
+        if not agent or not exp.isdigit() or int(exp) < _time.time():
+            _tg_send(token, chat['id'], '⌛ That connect link has expired. Tap “Connect Telegram” in the admin panel again.')
+            return True
+        if not _setting_on(db, 'agents_telegram', True):
+            _tg_send(token, chat['id'], 'ℹ️ The admin has turned off Telegram for support agents.')
+            return True
+        user = msg.get('from') or {}
+        tname = ('@' + user['username']) if user.get('username') else (user.get('first_name') or '')
+        # One Telegram account belongs to one agent
+        db.execute("UPDATE support_agents SET telegram_id='', telegram_name='' WHERE telegram_id=?", (str(chat['id']),))
+        db.execute('UPDATE support_agents SET telegram_id=?, telegram_name=? WHERE name=?', (str(chat['id']), tname[:60], agent))
+        db.commit()
+    finally:
+        db.close()
+    _tg_send(token, chat['id'], f'✅ Connected as <b>{_e(agent)}</b>. New loads, link requests and player messages will arrive here.\n\n' + _TG_HELP)
+    return True
+
+
+@app.route('/api/staff/telegram', methods=['GET'])
+def staff_telegram_status():
+    agent = get_support_agent()
+    if not agent:
+        return jsonify({'success': False, 'msg': 'Support agents only'}), 401
+    cfg = _tg.get_config()
+    db = get_db()
+    try:
+        row = db.execute('SELECT telegram_id, telegram_name FROM support_agents WHERE name=?', (agent,)).fetchone()
+        enabled = _setting_on(db, 'agents_telegram', True)
+    finally:
+        db.close()
+    return ok({'connected': bool(row and row['telegram_id']), 'telegram_name': (row['telegram_name'] if row else '') or '',
+               'bot_ready': bool(cfg['token']), 'enabled': enabled})
+
+
+@app.route('/api/staff/telegram/connect', methods=['POST'])
+def staff_telegram_connect():
+    agent = get_support_agent()
+    if not agent:
+        return jsonify({'success': False, 'msg': 'Support agents only'}), 401
+    cfg = _tg.get_config()
+    if not cfg['token']:
+        return err('The admin has not set up the Telegram bot yet (Payments & Settings → Telegram).')
+    db = get_db()
+    try:
+        if not _setting_on(db, 'agents_telegram', True):
+            return _deny('The admin has turned off Telegram for support agents.')
+        code = ''.join(_secrets.choice('ABCDEFGHJKMNPQRSTUVWXYZ23456789') for _ in range(8))
+        _upsert_setting(db, f'tglink_{code}', f'{agent}|{int(_time.time()) + 900}')   # valid 15 minutes
+    finally:
+        db.close()
+    bot = _tg_bot_username(cfg['token'])
+    return ok({'code': code, 'bot': bot, 'url': f'https://t.me/{bot}?start={code}' if bot else ''},
+              'Open the link and tap Start in Telegram')
+
+
+@app.route('/api/staff/telegram/disconnect', methods=['POST'])
+def staff_telegram_disconnect():
+    agent = get_support_agent()
+    if not agent:
+        return jsonify({'success': False, 'msg': 'Support agents only'}), 401
+    db = get_db()
+    try:
+        db.execute("UPDATE support_agents SET telegram_id='', telegram_name='' WHERE name=?", (agent,))
+        db.commit()
+    finally:
+        db.close()
+    return ok(msg='Telegram disconnected')
+
+
+@app.route('/api/admin/agents-telegram', methods=['GET', 'POST'])
+@require_admin
+def admin_agents_telegram():
+    db = get_db()
+    try:
+        if request.method == 'POST':
+            _upsert_setting(db, 'agents_telegram', '1' if (request.get_json(silent=True) or {}).get('enabled') else '0')
+        rows = db.execute("SELECT name, telegram_name FROM support_agents WHERE active=1 AND telegram_id<>'' ORDER BY name").fetchall()
+        return ok({'enabled': _setting_on(db, 'agents_telegram', True),
+                   'connected': [{'name': r['name'], 'telegram': r['telegram_name']} for r in rows]})
+    finally:
+        db.close()
+
+
 @app.route('/api/telegram/webhook', methods=['POST'])
 def telegram_webhook():
     """Telegram → us. A reply to a support message becomes an agent reply in that player's chat."""
@@ -5334,34 +5751,33 @@ def telegram_webhook():
     cfg = _tg.get_config()
     update = request.get_json(silent=True) or {}
 
-    # ✅ Loaded / ❌ Reject buttons on a load-request alert
+    # Buttons on alerts (loads, links, password resets)
     cq = update.get('callback_query')
     if cq:
-        cmsg = cq.get('message') or {}
-        cchat = str((cmsg.get('chat') or {}).get('id', ''))
-        parts = str(cq.get('data') or '').split(':')
-        reply = 'Not allowed'
-        if cchat in cfg['chats'] and len(parts) == 3 and parts[0] == 'lr' and parts[1].isdigit():
-            by = (cq.get('from') or {}).get('first_name') or 'Telegram'
-            done, reply, r = _lr_finish(int(parts[1]), parts[2], f'{by} (Telegram)')
-            if r:
-                verdict = ('✅ <b>Loaded</b>' if r['status'] == 'loaded' else '❌ <b>Rejected</b>') + \
-                          f" by {_e(r['handled_by'])}"
-                try:
-                    _tg.api(cfg['token'], 'editMessageText', {
-                        'chat_id': cchat, 'message_id': cmsg.get('message_id'), 'parse_mode': 'HTML',
-                        'text': _lr_tg_text(r) + '\n\n' + verdict})
-                except Exception as ex:
-                    print(f'[telegram] edit: {ex}')
+        cchat = str(((cq.get('message') or {}).get('chat') or {}).get('id', ''))
+        actor = _tg_actor(cchat, cq.get('from'))
         try:
-            _tg.api(cfg['token'], 'answerCallbackQuery', {'callback_query_id': cq.get('id'), 'text': reply[:190]})
+            reply = _tg_callback(cfg['token'], cq, actor) if actor else 'Not allowed'
+        except Exception as ex:
+            print(f'[telegram] button: {ex}')
+            reply = 'Something went wrong — try again in the admin panel.'
+        try:
+            _tg.api(cfg['token'], 'answerCallbackQuery', {'callback_query_id': cq.get('id'), 'text': str(reply)[:190]})
         except Exception:
             pass
         return jsonify({'ok': True})
 
     msg = update.get('message') or {}
+    if msg and cfg['token'] and _tg_try_connect(cfg['token'], msg):
+        return jsonify({'ok': True})
     chat_id = str((msg.get('chat') or {}).get('id', ''))
-    if not msg or chat_id not in cfg['chats']:
+    actor = _tg_actor(chat_id, msg.get('from')) if msg else None
+    if not actor:
+        if msg and (msg.get('chat') or {}).get('type') == 'private':
+            try:
+                _tg_send(cfg['token'], chat_id, '👋 This bot is for BigWin staff. Support agents: tap “Connect Telegram” in the admin panel.')
+            except Exception:
+                pass
         return jsonify({'ok': True})  # ignore strangers
 
     def answer(text):
@@ -5370,9 +5786,16 @@ def telegram_webhook():
 
     reply_to = (msg.get('reply_to_message') or {}).get('message_id')
     text = (msg.get('text') or '').strip()
+    if text.startswith('/'):
+        try:
+            out = _tg_command(cfg['token'], chat_id, text, actor, msg.get('message_id'))
+        except Exception as ex:
+            print(f'[telegram] command: {ex}')
+            out = '❌ Something went wrong — try again in the admin panel.'
+        if out:
+            answer(out)
+        return jsonify({'ok': True})
     if not reply_to:
-        if text.startswith('/start') or text.startswith('/help'):
-            answer('👋 Player support messages show up here. <b>Reply</b> to one to answer that player.')
         return jsonify({'ok': True})
 
     db = get_db()
@@ -5392,8 +5815,7 @@ def telegram_webhook():
         db.commit()
     finally:
         db.close()
-    who = (msg.get('from') or {}).get('first_name') or 'you'
-    answer(f"✅ Sent to <b>{_e(link['username'])}</b> (as {_e(link['agent'])}, by {_e(who)})")
+    answer(f"✅ Sent to <b>{_e(link['username'])}</b> (as {_e(link['agent'])}, by {_e(actor[0])})")
     return jsonify({'ok': True})
 
 

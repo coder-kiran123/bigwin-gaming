@@ -859,11 +859,16 @@
 
     <!-- Support Agents -->
     <div id="page-support-agents" class="page">
+      <div class="auto-switch" style="background:#fff;margin-bottom:14px">
+        <label class="switch"><input type="checkbox" id="agentsTgToggle" onchange="setAgentsTelegram(this.checked)"><span></span></label>
+        <div><strong>Support agents can work from Telegram</strong> <span class="auto-state" id="agentsTgState">ON</span>
+          <div class="lr-sub" id="agentsTgInfo">Each agent connects their own Telegram from Load Requests, then gets alerts with buttons and can use /loads, /links, /find, /newaccount, /resetpw and /link with your bot.</div></div>
+      </div>
       <div class="section-card" style="margin-bottom:20px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div>
             <h3 style="margin:0">Support Agents</h3>
-            <p style="color:var(--muted);font-size:13px;margin:4px 0 0">Manage agent names, icons, passwords, and access. Agents sign in at <strong>/admin</strong> → <strong>Support agent</strong> and only see Load Requests and Live Support.</p>
+            <p style="color:var(--muted);font-size:13px;margin:4px 0 0">Manage agent names, icons, passwords, and access. Agents sign in at <strong>/admin</strong> → <strong>Support agent</strong> and only see the Support pages (Load Requests, Live Support, Game ID Links and — if you allow it — Player Accounts).</p>
           </div>
           <button onclick="showCreateAgentForm()" style="background:#b8962e;color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer">+ Add Agent</button>
         </div>
@@ -986,6 +991,8 @@
             <div class="lr-sub" id="autoLoadGames">Lets support load games with one tap through connected Backends.</div>
           </div>
         </div>
+        <!-- Support agents: connect your own Telegram -->
+        <div class="auto-switch tg-card" id="tgCard"></div>
         <div id="lrList"></div>
       </div>
     </div>

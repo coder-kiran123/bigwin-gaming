@@ -497,6 +497,8 @@ def init_db():
                 password_hash TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0)""",
             "ALTER TABLE support_agents ADD COLUMN last_heartbeat DOUBLE PRECISION DEFAULT NULL",
+            "ALTER TABLE support_agents ADD COLUMN telegram_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE support_agents ADD COLUMN telegram_name TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE withdrawal_requests ADD COLUMN tip_amount DOUBLE PRECISION NOT NULL DEFAULT 0",
         ]:
             try:
@@ -569,6 +571,8 @@ def init_db():
                 active INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER NOT NULL DEFAULT 0)""",
             "ALTER TABLE support_agents ADD COLUMN last_heartbeat REAL DEFAULT NULL",
+            "ALTER TABLE support_agents ADD COLUMN telegram_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE support_agents ADD COLUMN telegram_name TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE withdrawal_requests ADD COLUMN tip_amount REAL NOT NULL DEFAULT 0",
         ]:
             try:
