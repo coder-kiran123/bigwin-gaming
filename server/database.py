@@ -459,6 +459,12 @@ def init_db():
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS referred_by_name TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS google_uid TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS avatar TEXT DEFAULT ''",
+            """CREATE TABLE IF NOT EXISTS shifts (
+                id SERIAL PRIMARY KEY, agent TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT DEFAULT '',
+                start_note TEXT DEFAULT '', end_note TEXT DEFAULT '', summary TEXT DEFAULT '', ended_by TEXT DEFAULT '')""",
+            """CREATE TABLE IF NOT EXISTS shift_schedule (
+                id SERIAL PRIMARY KEY, agent TEXT NOT NULL, weekday INTEGER NOT NULL,
+                start_time TEXT NOT NULL, end_time TEXT NOT NULL, created_at TEXT DEFAULT '')""",
             """CREATE TABLE IF NOT EXISTS cashouts (
                 id SERIAL PRIMARY KEY, player_id INTEGER, player TEXT DEFAULT '', game TEXT DEFAULT '',
                 method TEXT DEFAULT '', amount REAL NOT NULL, score REAL NOT NULL, note TEXT DEFAULT '',
@@ -542,6 +548,12 @@ def init_db():
             "ALTER TABLE players ADD COLUMN referred_by_name TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN google_uid TEXT DEFAULT ''",
             "ALTER TABLE players ADD COLUMN avatar TEXT DEFAULT ''",
+            """CREATE TABLE IF NOT EXISTS shifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT DEFAULT '',
+                start_note TEXT DEFAULT '', end_note TEXT DEFAULT '', summary TEXT DEFAULT '', ended_by TEXT DEFAULT '')""",
+            """CREATE TABLE IF NOT EXISTS shift_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, weekday INTEGER NOT NULL,
+                start_time TEXT NOT NULL, end_time TEXT NOT NULL, created_at TEXT DEFAULT '')""",
             """CREATE TABLE IF NOT EXISTS cashouts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INTEGER, player TEXT DEFAULT '', game TEXT DEFAULT '',
                 method TEXT DEFAULT '', amount REAL NOT NULL, score REAL NOT NULL, note TEXT DEFAULT '',

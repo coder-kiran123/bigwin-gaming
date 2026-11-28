@@ -175,6 +175,15 @@
     </div>
 
     <div class="nav-section" data-admin>
+      <div class="nav-label">TEAM</div>
+      <a href="#" class="nav-item" data-page="shifts" onclick="showPage('shifts',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        Shifts
+        <span id="shiftNavBadge" class="nav-badge" style="display:none;background:#16a34a"></span>
+      </a>
+    </div>
+
+    <div class="nav-section" data-admin>
       <div class="nav-label">SETUP</div>
       <a href="#" class="nav-item" data-page="payment-methods" data-admin onclick="showPage('payment-methods',this)">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
@@ -999,9 +1008,45 @@
             <div class="lr-sub" id="autoLoadGames">Lets support load games with one tap through connected Backends.</div>
           </div>
         </div>
+        <!-- Support agents: clock in / out -->
+        <div class="shift-card" id="shiftCard"></div>
         <!-- Support agents: connect your own Telegram -->
         <div class="auto-switch tg-card" id="tgCard"></div>
         <div id="lrList"></div>
+      </div>
+    </div>
+
+    <div id="page-shifts" class="page">
+      <div class="rep-bar">
+        <div class="rep-dates">Shift times in
+          <select id="shTz" onchange="setShiftTz(this.value)"></select></div>
+        <div class="rep-periods">
+          <button class="lr-tab" data-shd="7" onclick="loadShifts(7)">7 days</button>
+          <button class="lr-tab" data-shd="30" onclick="loadShifts(30)">30 days</button>
+        </div>
+      </div>
+      <div class="dash-grid">
+        <div class="section-card"><div class="section-header"><h3>On shift now</h3></div><div id="shNow"></div></div>
+        <div class="section-card"><div class="section-header"><h3>Today's schedule</h3></div><div id="shToday"></div></div>
+      </div>
+      <div class="section-card" style="margin-top:16px">
+        <div class="section-header"><h3>Hours</h3><span class="kpi-sub" id="shHoursLbl"></span></div>
+        <div class="rep-table" id="shHours"></div>
+      </div>
+      <div class="section-card" style="margin-top:16px">
+        <div class="section-header"><h3>Weekly schedule</h3></div>
+        <form class="sh-form" onsubmit="event.preventDefault(); addSchedule(this)">
+          <select name="agent" id="shAgent" required></select>
+          <div class="sh-days" id="shDays"></div>
+          <input type="time" name="start" required value="09:00"> – <input type="time" name="end" required value="17:00">
+          <button type="submit" class="lr-btn lr-btn--ok">Add shift</button>
+          <div class="lr-sub gl-out"></div>
+        </form>
+        <div id="shWeek"></div>
+      </div>
+      <div class="section-card" style="margin-top:16px">
+        <div class="section-header"><h3>Shift reports</h3></div>
+        <div id="shRecent"></div>
       </div>
     </div>
 

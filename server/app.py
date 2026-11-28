@@ -6,7 +6,7 @@ import re
 import secrets as _secrets
 import bcrypt as _bcrypt
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, time as dtime
 from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
 from werkzeug.utils import safe_join
 from flask_cors import CORS
@@ -5540,6 +5540,341 @@ def admin_report():
                'by_method': by_method, 'by_game': by_game, 'by_day': by_day})
 
 
+# ─────────────────────────────────────────
+#  SHIFTS: clock in/out, shift report + handover, weekly schedule (in the admin's timezone)
+# ─────────────────────────────────────────
+from zoneinfo import ZoneInfo
+_TZ_CHOICES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles',
+               'UTC', 'Asia/Kathmandu', 'Asia/Kolkata', 'Asia/Manila', 'Asia/Dhaka']
+_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+_LATE_MIN = 10
+_HHMM = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
+
+
+def _now_s():
+    return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _utc(s_):
+    return datetime.strptime(str(s_)[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+
+
+def _shift_tz(db=None):
+    own = db is None
+    db = db or get_db()
+    try:
+        row = db.execute("SELECT value FROM site_settings WHERE key='shift_timezone'").fetchone()
+        name = (row['value'] if row else '') or 'America/New_York'
+    finally:
+        if own:
+            db.close()
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo('UTC')
+
+
+def _local_str(utc_s, tz):
+    return _utc(utc_s).astimezone(tz).strftime('%a %b %d, %I:%M %p').replace(' 0', ' ')
+
+
+def _schedule_rows(db, agent=None):
+    sql = 'SELECT * FROM shift_schedule' + (' WHERE agent=?' if agent else '') + ' ORDER BY weekday, start_time'
+    return rows_to_list(db.execute(sql, (agent,) if agent else ()).fetchall())
+
+
+def _planned_for(db, local_date, tz):
+    """Planned shifts that start on `local_date` (in tz): [{agent, start, end}] as UTC datetimes."""
+    out = []
+    for r in _schedule_rows(db):
+        if r['weekday'] != local_date.weekday():
+            continue
+        sh, sm = map(int, r['start_time'].split(':'))
+        eh, em = map(int, r['end_time'].split(':'))
+        start = datetime.combine(local_date, dtime(sh, sm), tz)
+        end = datetime.combine(local_date, dtime(eh, em), tz)
+        if end <= start:
+            end += timedelta(days=1)          # overnight shift
+        out.append({'id': r['id'], 'agent': r['agent'], 'start': start.astimezone(timezone.utc),
+                    'end': end.astimezone(timezone.utc),
+                    # a schedule only counts from when it was added (no 'missed' shifts before it existed)
+                    'since': _utc(r['created_at']) if r.get('created_at') else None})
+    return out
+
+
+def _slot_status(db, slot, now):
+    """on_time / late / on_shift / upcoming / missed for one planned slot."""
+    rows = db.execute('SELECT started_at, ended_at FROM shifts WHERE agent=? AND started_at BETWEEN ? AND ? ORDER BY started_at',
+                      (slot['agent'], (slot['start'] - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S'),
+                       slot['end'].strftime('%Y-%m-%d %H:%M:%S'))).fetchall()
+    late_by = lambda t: int((t - slot['start']).total_seconds() // 60)
+    if rows:
+        cin = _utc(rows[0]['started_at'])
+        mins = late_by(cin)
+        open_ = any(not r['ended_at'] for r in rows)
+        if mins > _LATE_MIN:
+            return ('late', f'Late {mins} min' + (' · on shift' if open_ else ''))
+        return ('on_shift', 'On shift') if open_ else ('on_time', 'On time')
+    if now < slot['start']:
+        return ('upcoming', 'Upcoming')
+    if now <= slot['end']:
+        return ('late', f'Not clocked in ({late_by(now)} min)') if late_by(now) > _LATE_MIN else ('upcoming', 'Starting')
+    return ('missed', 'Missed')
+
+
+def _shift_summary(db, agent, start_s, end_s):
+    """What one agent did between two UTC times (panel + Telegram + auto loads)."""
+    who = ' (handled_by=? OR handled_by LIKE ?) '
+    args = (agent, agent + ' (%')
+    loads = db.execute(f"SELECT status, method, COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM load_requests "
+                       f"WHERE {who} AND handled_at BETWEEN ? AND ? GROUP BY status, method", args + (start_s, end_s)).fetchall()
+    outs = db.execute(f"SELECT method, COUNT(*) AS n, COALESCE(SUM(amount),0) AS s FROM cashouts "
+                      f"WHERE (created_by=? OR created_by LIKE ?) AND created_at BETWEEN ? AND ? GROUP BY method",
+                      args + (start_s, end_s)).fetchall()
+    links = db.execute(f"SELECT COUNT(*) AS n FROM link_requests WHERE {who} AND status='approved' AND handled_at BETWEEN ? AND ?",
+                       args + (start_s, end_s)).fetchone()['n']
+    names = {m['key']: m['name'] for m in db.execute('SELECT key, name FROM payment_methods').fetchall()}
+    per = {}
+    loaded_n = rejected_n = 0
+    loaded_s = 0.0
+    for r in loads:
+        if r['status'] == 'loaded':
+            loaded_n += r['n']; loaded_s += float(r['s'])
+            per.setdefault(names.get(r['method'], r['method']), [0.0, 0.0])[0] += float(r['s'])
+        elif r['status'] == 'rejected':
+            rejected_n += r['n']
+    out_n, out_s = 0, 0.0
+    for r in outs:
+        out_n += r['n']; out_s += float(r['s'])
+        per.setdefault(names.get(r['method'], r['method']), [0.0, 0.0])[1] += float(r['s'])
+    hours = (_utc(end_s) - _utc(start_s)).total_seconds() / 3600
+    return {'agent': agent, 'start': start_s, 'end': end_s, 'hours': round(hours, 2),
+            'loads': loaded_n, 'loaded': round(loaded_s, 2), 'rejected': rejected_n,
+            'cashouts': out_n, 'paid_out': round(out_s, 2), 'links': links,
+            'by_method': [{'method': k, 'in': round(v[0], 2), 'out': round(v[1], 2)} for k, v in sorted(per.items())]}
+
+
+def _shift_text(sm):
+    lines = [f"⏱ {sm['hours']:.1f} h · ✅ {sm['loads']} loads {_money(sm['loaded'])}"
+             + (f" · ❌ {sm['rejected']} rejected" if sm['rejected'] else '')
+             + f" · 💸 {sm['cashouts']} cashouts {_money(sm['paid_out'])}"
+             + (f" · 🔗 {sm['links']} links" if sm['links'] else '')]
+    for m in sm['by_method']:
+        lines.append(f"  {m['method']}: in {_money(m['in'])} · out {_money(m['out'])}")
+    return '\n'.join(lines)
+
+
+def _open_shift(db, agent):
+    row = db.execute("SELECT * FROM shifts WHERE agent=? AND (ended_at IS NULL OR ended_at='') ORDER BY id DESC LIMIT 1",
+                     (agent,)).fetchone()
+    return dict(row) if row else None
+
+
+def _clock_in(agent, note='', source='panel'):
+    db = get_db()
+    try:
+        if _open_shift(db, agent):
+            return False, 'You are already on shift.', {}
+        now_s = _now_s()
+        db.execute('INSERT INTO shifts (agent, started_at, start_note) VALUES (?,?,?)', (agent, now_s, (note or '')[:300]))
+        db.commit()
+        # Last handover note left by anyone
+        h = db.execute("SELECT agent, end_note, ended_at FROM shifts WHERE end_note<>'' AND ended_at<>'' ORDER BY ended_at DESC LIMIT 1").fetchone()
+        tz = _shift_tz(db)
+        now = _utc(now_s)
+        late = ''
+        for d in (now.astimezone(tz).date(), now.astimezone(tz).date() - timedelta(days=1)):
+            for slot in _planned_for(db, d, tz):
+                if (slot['agent'] == agent and slot['start'] - timedelta(hours=2) <= now <= slot['end']
+                        and not (slot['since'] and slot['start'] < slot['since'])):
+                    mins = int((now - slot['start']).total_seconds() // 60)
+                    if mins > _LATE_MIN:
+                        late = f'{mins} min late'
+    finally:
+        db.close()
+    _staff_note(f"🟢 <b>{_e(agent)}</b> clocked in" + (f" — ⚠️ {late}" if late else '') + (f" ({_e(source)})" if source != 'panel' else ''))
+    return True, 'Clocked in' + (f' — {late}' if late else '') + '. Have a good shift!', {
+        'late': late, 'handover': {'agent': h['agent'], 'note': h['end_note'], 'at': h['ended_at']} if h else None}
+
+
+def _clock_out(agent, note='', by=None):
+    db = get_db()
+    try:
+        sh = _open_shift(db, agent)
+        if not sh:
+            return False, 'You are not on shift.', None
+        now_s = _now_s()
+        summ = _shift_summary(db, agent, sh['started_at'], now_s)
+        db.execute('UPDATE shifts SET ended_at=?, end_note=?, summary=?, ended_by=? WHERE id=?',
+                   (now_s, (note or '')[:500], json.dumps(summ), by or agent, sh['id']))
+        db.commit()
+    finally:
+        db.close()
+    _staff_note(f"🔴 <b>{_e(agent)}</b> clocked out" + (f" (ended by {_e(by)})" if by and by != agent else '') + '\n'
+                + _e(_shift_text(summ)) + (f"\n📝 Handover: {_e(note)}" if note else ''))
+    return True, 'Clocked out. Thanks!', summ
+
+
+def _my_shift(agent):
+    db = get_db()
+    try:
+        cur = _open_shift(db, agent)
+        tz = _shift_tz(db)
+        sched = _schedule_rows(db, agent)
+        h = db.execute("SELECT agent, end_note, ended_at FROM shifts WHERE end_note<>'' AND ended_at<>'' ORDER BY ended_at DESC LIMIT 1").fetchone()
+        live = _shift_summary(db, agent, cur['started_at'], _now_s()) if cur else None
+    finally:
+        db.close()
+    el = int((datetime.now(timezone.utc) - _utc(cur['started_at'])).total_seconds() // 60) if cur else 0
+    return {'current': cur, 'elapsed_min': el, 'live': live, 'tz': tz, 'schedule': sched,
+            'handover': {'agent': h['agent'], 'note': h['end_note'], 'at': h['ended_at']} if h else None}
+
+
+@app.route('/api/staff/shift', methods=['GET'])
+def staff_shift():
+    agent = get_support_agent()
+    if not agent:
+        return jsonify({'success': False, 'msg': 'Support agents only'}), 401
+    st = _my_shift(agent)
+    st['tz'] = str(st['tz'])
+    return ok(st)
+
+
+@app.route('/api/staff/shift/<action>', methods=['POST'])
+def staff_shift_action(action):
+    agent = get_support_agent()
+    if not agent:
+        return jsonify({'success': False, 'msg': 'Support agents only'}), 401
+    note = str((request.get_json(silent=True) or {}).get('note') or '').strip()
+    if action == 'clock-in':
+        done, msg, info = _clock_in(agent, note)
+        return ok(info, msg) if done else err(msg)
+    if action == 'clock-out':
+        done, msg, summ = _clock_out(agent, note)
+        return ok(summ, msg) if done else err(msg)
+    return err('Unknown action', 404)
+
+
+@app.route('/api/admin/shifts', methods=['GET'])
+@require_admin
+def admin_shifts():
+    db = get_db()
+    try:
+        tz = _shift_tz(db)
+        now = datetime.now(timezone.utc)
+        today = now.astimezone(tz).date()
+        days = max(1, min(62, request.args.get('days', 7, type=int)))
+        since = (now - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        on_shift = [dict(r) for r in db.execute("SELECT * FROM shifts WHERE ended_at IS NULL OR ended_at='' ORDER BY started_at").fetchall()]
+        for r in on_shift:
+            r['elapsed_min'] = int((now - _utc(r['started_at'])).total_seconds() // 60)
+            r['local_start'] = _local_str(r['started_at'], tz)
+        # Today's plan (plus overnight shifts from yesterday still running)
+        plan = []
+        for d in (today - timedelta(days=1), today):
+            for slot in _planned_for(db, d, tz):
+                if d < today and slot['end'] < now:
+                    continue
+                code, label = _slot_status(db, slot, now)
+                if slot['since'] and slot['start'] < slot['since'] and code in ('late', 'missed'):
+                    code, label = 'upcoming', 'Added today'
+                plan.append({'agent': slot['agent'], 'start': slot['start'].astimezone(tz).strftime('%I:%M %p').lstrip('0'),
+                             'end': slot['end'].astimezone(tz).strftime('%I:%M %p').lstrip('0'), 'status': code, 'label': label,
+                             'sort': slot['start'].isoformat()})
+        plan.sort(key=lambda x: x['sort'])
+        # Hours worked vs planned in the period
+        agents = [r['name'] for r in db.execute('SELECT name FROM support_agents WHERE active=1 ORDER BY sort_order, id').fetchall()]
+        hours = {a: {'agent': a, 'worked': 0.0, 'shifts': 0, 'planned': 0.0, 'late': 0, 'missed': 0} for a in agents}
+        for r in db.execute('SELECT agent, started_at, ended_at FROM shifts WHERE started_at >= ?', (since,)).fetchall():
+            h = hours.setdefault(r['agent'], {'agent': r['agent'], 'worked': 0.0, 'shifts': 0, 'planned': 0.0, 'late': 0, 'missed': 0})
+            end = _utc(r['ended_at']) if r['ended_at'] else now
+            h['worked'] += (end - _utc(r['started_at'])).total_seconds() / 3600
+            h['shifts'] += 1
+        for i in range(days):
+            for slot in _planned_for(db, today - timedelta(days=i), tz):
+                if slot['start'] > now or (slot['since'] and slot['start'] < slot['since']):
+                    continue
+                h = hours.setdefault(slot['agent'], {'agent': slot['agent'], 'worked': 0.0, 'shifts': 0, 'planned': 0.0, 'late': 0, 'missed': 0})
+                h['planned'] += (slot['end'] - slot['start']).total_seconds() / 3600
+                code, _l = _slot_status(db, slot, now)
+                h['late'] += code == 'late'
+                h['missed'] += code == 'missed'
+        recent = rows_to_list(db.execute("SELECT * FROM shifts WHERE ended_at<>'' ORDER BY ended_at DESC LIMIT 20").fetchall())
+        for r in recent:
+            r['summary'] = json.loads(r['summary']) if r.get('summary') else None
+            r['local_start'], r['local_end'] = _local_str(r['started_at'], tz), _local_str(r['ended_at'], tz)
+        schedule = _schedule_rows(db)
+    finally:
+        db.close()
+    return ok({'tz': str(tz), 'tz_choices': _TZ_CHOICES, 'agents': agents, 'on_shift': on_shift, 'today': plan,
+               'hours': [dict(v, worked=round(v['worked'], 1), planned=round(v['planned'], 1)) for v in hours.values()],
+               'recent': recent, 'schedule': schedule, 'days': days, 'late_minutes': _LATE_MIN})
+
+
+@app.route('/api/admin/shifts/schedule', methods=['POST'])
+@require_admin
+def admin_add_schedule():
+    d = request.get_json(silent=True) or {}
+    agent, st, en = str(d.get('agent') or '').strip(), str(d.get('start') or ''), str(d.get('end') or '')
+    days = d.get('weekdays') or []
+    if not agent or not _HHMM.match(st) or not _HHMM.match(en) or st == en:
+        return err('Pick an agent and a start and end time.')
+    if not isinstance(days, list) or not days or not all(isinstance(x, int) and 0 <= x <= 6 for x in days):
+        return err('Pick at least one day.')
+    db = get_db()
+    try:
+        if not db.execute('SELECT 1 FROM support_agents WHERE name=?', (agent,)).fetchone():
+            return err('Unknown agent.')
+        for wd in sorted(set(days)):
+            db.execute('INSERT INTO shift_schedule (agent, weekday, start_time, end_time, created_at) VALUES (?,?,?,?,?)',
+                       (agent, wd, st, en, _now_s()))
+        db.commit()
+    finally:
+        db.close()
+    return ok(msg=f'Added {agent}: ' + ', '.join(_DAYS[x] for x in sorted(set(days))) + f' {st}–{en}')
+
+
+@app.route('/api/admin/shifts/schedule/<int:sid>', methods=['DELETE'])
+@require_admin
+def admin_delete_schedule(sid):
+    db = get_db()
+    try:
+        cur = db.execute('DELETE FROM shift_schedule WHERE id=?', (sid,))
+        db.commit()
+    finally:
+        db.close()
+    return ok(msg='Removed') if cur.rowcount else err('Not found', 404)
+
+
+@app.route('/api/admin/shifts/timezone', methods=['POST'])
+@require_admin
+def admin_shift_timezone():
+    tz = str((request.get_json(silent=True) or {}).get('tz') or '')
+    if tz not in _TZ_CHOICES:
+        return err('Pick a timezone from the list.')
+    db = get_db()
+    try:
+        _upsert_setting(db, 'shift_timezone', tz)
+    finally:
+        db.close()
+    return ok(msg=f'Shift times are now in {tz}')
+
+
+@app.route('/api/admin/shifts/<int:shid>/end', methods=['POST'])
+@require_admin
+def admin_end_shift(shid):
+    """Admin ends a shift someone forgot to clock out of."""
+    db = get_db()
+    try:
+        row = db.execute("SELECT agent FROM shifts WHERE id=? AND (ended_at IS NULL OR ended_at='')", (shid,)).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return err('That shift is already over.')
+    done, msg, summ = _clock_out(row['agent'], 'Ended by admin', 'Admin')
+    return ok(summ, 'Shift ended') if done else err(msg)
+
+
 @app.route('/api/staff/dashboard', methods=['GET'])
 @require_admin
 def staff_dashboard():
@@ -5664,7 +5999,7 @@ def _tg_actor(chat_id, user):
     cfg = _tg.get_config()
     first = (user or {}).get('first_name') or 'Telegram'
     if chat_id in cfg['chats']:
-        return f'{first} (Telegram)', True, True
+        return f'{first} (Telegram)', True, True, None
     db = get_db()
     try:
         if not _setting_on(db, 'agents_telegram', True):
@@ -5674,7 +6009,7 @@ def _tg_actor(chat_id, user):
         if not row:
             return None
         return (f"{row['name']} (Telegram)", _setting_on(db, 'link_agents_enabled', True),
-                _setting_on(db, 'agents_manage_players', True))
+                _setting_on(db, 'agents_manage_players', True), row['name'])
     finally:
         db.close()
 
@@ -5696,12 +6031,13 @@ _TG_HELP = ("🤖 <b>BigWin support bot</b>\n"
             "/link <i>email game username</i> — link an existing game account\n"
             "/unlink <i>email game</i> — remove a wrong link\n"
             "/cashout <i>amount method game [email]</i> — record a payout you sent\n"
+            "/clockin · /clockout <i>handover note</i> · /shift — your shift\n"
             "<b>Reply</b> to a 💬 player message to answer them in their chat.")
 
 
 def _tg_command(token, chat_id, text, actor, reply_to):
     """Slash commands from admin chats or a connected agent. Returns the reply text (or '' if handled)."""
-    by, can_link, can_players = actor
+    by, can_link, can_players = actor[:3]
     cmd, _, rest = text.partition(' ')
     cmd = cmd.split('@')[0].lower()
     rest = rest.strip()
@@ -5734,6 +6070,23 @@ def _tg_command(token, chat_id, text, actor, reply_to):
         for r in rows:
             _tg_send(token, chat_id, _gl_tg_text(r), _gl_buttons(r['id']) if can_link else None)
         return '' if can_link else 'ℹ️ Only the admin can approve links right now.'
+    if cmd in ('/clockin', '/clockout', '/shift'):
+        agent = actor[3] if len(actor) > 3 else None
+        if not agent:
+            return 'ℹ️ Shift commands are for support agents in their own chat with the bot.'
+        if cmd == '/clockin':
+            done, msg, info = _clock_in(agent, rest, 'Telegram')
+            return ('🟢 ' if done else '❌ ') + _e(msg) + (f"\n\n📝 Handover from {_e(info['handover']['agent'])}: {_e(info['handover']['note'])}"
+                                                      if done and info.get('handover') else '')
+        if cmd == '/clockout':
+            done, msg, summ = _clock_out(agent, rest, agent)
+            return ('🔴 ' if done else '❌ ') + _e(msg) + (('\n\n' + _shift_text(summ)) if done else '')
+        st = _my_shift(agent)
+        cur = st['current']
+        return ((f"🟢 On shift since {_e(_local_str(cur['started_at'], st['tz']))} ({st['elapsed_min'] // 60}h {st['elapsed_min'] % 60}m)"
+                 if cur else '⚪ Not on shift. /clockin to start.')
+                + ('\n\n🗓 Your week:\n' + '\n'.join(f"{_DAYS[x['weekday']]} {x['start_time']}–{x['end_time']}" for x in st['schedule'])
+                   if st['schedule'] else '\n\nNo schedule set.'))
     if cmd == '/cashout':
         parts = rest.split()
         if len(parts) < 3:
@@ -5822,7 +6175,7 @@ def _tg_command(token, chat_id, text, actor, reply_to):
 
 def _tg_callback(token, cq, actor):
     """Inline buttons: lr:<id>:loaded|reject|auto, gl:<id>:check|approve|reject, pw:<player id>."""
-    by, can_link, can_players = actor
+    by, can_link, can_players = actor[:3]
     cmsg = cq.get('message') or {}
     chat, mid = str((cmsg.get('chat') or {}).get('id', '')), cmsg.get('message_id')
     parts = str(cq.get('data') or '').split(':')

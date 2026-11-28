@@ -160,6 +160,7 @@ function showPage(pageId, clickedEl) {
     'accounts':           'Player Accounts',
     'cashouts':           'Cashouts',
     'reports':            'Reports',
+    'shifts':             'Shifts',
     'support-agents':     'Support Agents',
     'referrals':          'Referral Program',
   };
@@ -187,9 +188,10 @@ function showPage(pageId, clickedEl) {
   if (pageId === 'payment-methods')    { renderPaymentMethods(); renderKeyhubConfig(); renderSmsConfig(); renderTelegramConfig(); renderEmailConfig(); renderSocialLinks(); }
   if (pageId === 'cashout-rules')      renderCashoutRules();
   if (pageId === 'support-chat')        { loadConversations(); }
-  if (pageId === 'load-requests')       { renderLoadRequests(); if (isAgent()) renderTelegramCard(); }
+  if (pageId === 'load-requests')       { renderLoadRequests(); if (isAgent()) { renderTelegramCard(); renderShiftCard(); } }
   if (pageId === 'game-links')          renderGameLinks();
   if (pageId === 'cashouts')            renderCashouts();
+  if (pageId === 'shifts')              loadShifts();
   if (pageId === 'reports')             setReportPeriod(repPeriod === 'custom' ? 'custom' : repPeriod);
   if (pageId === 'support-agents')      { renderSupportAgents(); renderAgentsTelegramSwitch(); }
   if (pageId === 'referrals')          { loadReferrals(); }
@@ -1936,6 +1938,117 @@ async function setAutoLoad(on) {
   const res = await apiFetch('/admin/auto-load', 'POST', { enabled: on });
   if (!res.success) alert(res.msg || 'Could not change the setting');
   renderLoadRequests();
+}
+
+// ── SHIFTS ──
+const SH_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const hm = m => `${Math.floor(m / 60)}h ${m % 60}m`;
+const t12 = t => { const [h, m] = t.split(':').map(Number); return `${(h % 12) || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+const shSummary = s => s ? `✅ ${s.loads} loads ${dMoney(s.loaded)}${s.rejected ? ` · ❌ ${s.rejected}` : ''} · 💸 ${s.cashouts} cashouts ${dMoney(s.paid_out)}${s.links ? ` · 🔗 ${s.links}` : ''}` : '';
+
+// Agent: clock in / out card
+async function renderShiftCard() {
+  const card = document.getElementById('shiftCard');
+  if (!card) return;
+  const res = await apiFetch('/staff/shift');
+  if (!res.success) { card.style.display = 'none'; return; }
+  const d = res.data, cur = d.current;
+  const week = d.schedule.length ? d.schedule.map(x => `${SH_DAYS[x.weekday]} ${t12(x.start_time)}–${t12(x.end_time)}`).join(' · ') : 'No schedule set';
+  card.innerHTML = cur
+    ? `<div class="shift-top"><span class="shift-dot on"></span><div style="flex:1"><strong>On shift</strong> · ${hm(d.elapsed_min)}
+         <div class="lr-sub">${lrEsc(shSummary(d.live))}</div></div>
+         <button class="lr-btn lr-btn--no" onclick="clockOut()">Clock out</button></div>
+       <div class="lr-sub">🗓 ${lrEsc(week)} (${lrEsc(d.tz)})</div>`
+    : `<div class="shift-top"><span class="shift-dot"></span><div style="flex:1"><strong>Not on shift</strong>
+         <div class="lr-sub">🗓 ${lrEsc(week)} (${lrEsc(d.tz)})</div></div>
+         <button class="lr-btn lr-btn--ok" onclick="clockIn()">Clock in</button></div>
+       ${d.handover ? `<div class="handover">📝 Last handover from <strong>${lrEsc(d.handover.agent)}</strong>: ${lrEsc(d.handover.note)}</div>` : ''}`;
+}
+async function clockIn() {
+  const res = await apiFetch('/staff/shift/clock-in', 'POST', {});
+  if (!res.success) return alert(res.msg);
+  let txt = res.msg;
+  if (res.data && res.data.handover) txt += `\n\n📝 Handover from ${res.data.handover.agent}:\n${res.data.handover.note}`;
+  alert(txt);
+  renderShiftCard();
+}
+async function clockOut() {
+  const note = prompt('Handover note for the next shift (optional):\ne.g. "Sam is waiting on a $50 Juwa cashout"', '');
+  if (note === null) return;
+  const res = await apiFetch('/staff/shift/clock-out', 'POST', { note: note.trim() });
+  if (!res.success) return alert(res.msg);
+  const s = res.data;
+  alert(`${res.msg}\n\n${s.hours.toFixed(1)} h · ${s.loads} loads ${dMoney(s.loaded)} · ${s.cashouts} cashouts ${dMoney(s.paid_out)}`
+    + s.by_method.map(m => `\n${m.method}: in ${dMoney(m.in)} · out ${dMoney(m.out)}`).join(''));
+  renderShiftCard();
+}
+
+// Admin: Shifts page
+let shDays = 7;
+async function loadShifts(days) {
+  if (days) shDays = days;
+  document.querySelectorAll('[data-shd]').forEach(b => b.classList.toggle('active', +b.dataset.shd === shDays));
+  const res = await apiFetch('/admin/shifts?days=' + shDays);
+  if (!res.success) return;
+  const d = res.data;
+  const tzSel = document.getElementById('shTz');
+  tzSel.innerHTML = d.tz_choices.map(z => `<option ${z === d.tz ? 'selected' : ''}>${lrEsc(z)}</option>`).join('');
+  const ag = document.getElementById('shAgent');
+  if (!ag.options.length) ag.innerHTML = '<option value="">Agent…</option>' + d.agents.map(a => `<option>${lrEsc(a)}</option>`).join('');
+  const dayBox = document.getElementById('shDays');
+  if (!dayBox.children.length) dayBox.innerHTML = SH_DAYS.map((x, i) => `<label><input type="checkbox" value="${i}" ${i < 5 ? 'checked' : ''}>${x}</label>`).join('');
+  const badge = document.getElementById('shiftNavBadge');
+  badge.textContent = d.on_shift.length; badge.style.display = d.on_shift.length ? '' : 'none';
+  document.getElementById('shNow').innerHTML = d.on_shift.length ? d.on_shift.map(s => `
+    <div class="dash-row"><span class="shift-dot on"></span><div class="dash-mid"><strong>${lrEsc(s.agent)}</strong>
+      <div class="lr-sub">since ${lrEsc(s.local_start)} · ${hm(s.elapsed_min)}</div></div>
+      <button class="lr-btn lr-btn--no" onclick="endShift(${s.id}, '${lrEsc(s.agent)}')">End</button></div>`).join('')
+    : '<p class="dash-empty">Nobody is clocked in.</p>';
+  const chip = { on_time: ['#dcfce7', '#166534'], on_shift: ['#dcfce7', '#166534'], late: ['#fef3c7', '#92400e'], missed: ['#fee2e2', '#991b1b'], upcoming: ['#f3f4f6', '#374151'] };
+  document.getElementById('shToday').innerHTML = d.today.length ? d.today.map(p => `
+    <div class="dash-row"><div class="dash-mid"><strong>${lrEsc(p.agent)}</strong><div class="lr-sub">${lrEsc(p.start)} – ${lrEsc(p.end)}</div></div>
+      <span class="lr-chip" style="background:${chip[p.status][0]};color:${chip[p.status][1]}">${lrEsc(p.label)}</span></div>`).join('')
+    : '<p class="dash-empty">No shifts planned today.</p>';
+  document.getElementById('shHoursLbl').textContent = `last ${d.days} days · late = more than ${d.late_minutes} min`;
+  document.getElementById('shHours').innerHTML = repTable([
+    { key: 'agent', label: 'Agent' }, { key: 'shifts', label: 'Shifts', num: 1 }, { key: 'worked', label: 'Hours worked', num: 1 },
+    { key: 'planned', label: 'Hours planned', num: 1 }, { key: 'late', label: 'Late', num: 1 }, { key: 'missed', label: 'Missed', num: 1 },
+  ], d.hours);
+  const byAgent = {};
+  d.schedule.forEach(x => (byAgent[x.agent] = byAgent[x.agent] || []).push(x));
+  document.getElementById('shWeek').innerHTML = Object.keys(byAgent).length ? Object.entries(byAgent).map(([a, list]) => `
+    <div class="lr-card"><div class="lr-main"><div><strong>${lrEsc(a)}</strong><div class="gid-chips">${list.map(x => `
+      <span class="gid-chip">${SH_DAYS[x.weekday]} ${t12(x.start_time)}–${t12(x.end_time)}<button onclick="removeSchedule(${x.id})">✕</button></span>`).join('')}</div></div></div></div>`).join('')
+    : '<p class="dash-empty">No schedule yet — add shifts above.</p>';
+  document.getElementById('shRecent').innerHTML = d.recent.length ? d.recent.map(r => `
+    <div class="lr-card"><div class="lr-main"><div style="min-width:0"><div class="lr-line"><strong>${lrEsc(r.agent)}</strong> · ${lrEsc(r.local_start)} → ${lrEsc(r.local_end)}${r.summary ? ` · ${r.summary.hours.toFixed(1)} h` : ''}</div>
+      <div class="lr-sub">${lrEsc(shSummary(r.summary))}</div>
+      ${r.summary && r.summary.by_method.length ? `<div class="lr-sub">${r.summary.by_method.map(m => `${lrEsc(m.method)}: in ${dMoney(m.in)} · out ${dMoney(m.out)}`).join(' &nbsp;|&nbsp; ')}</div>` : ''}
+      ${r.end_note ? `<div class="handover">📝 ${lrEsc(r.end_note)}</div>` : ''}</div></div></div>`).join('')
+    : '<p class="dash-empty">No finished shifts yet.</p>';
+}
+async function addSchedule(form) {
+  const out = form.querySelector('.gl-out');
+  const days = [...form.querySelectorAll('#shDays input:checked')].map(x => +x.value);
+  const res = await apiFetch('/admin/shifts/schedule', 'POST', { agent: form.agent.value, start: form.start.value, end: form.end.value, weekdays: days });
+  out.textContent = res.msg || ''; out.style.color = res.success ? '#16a34a' : '#ef4444';
+  if (res.success) loadShifts();
+}
+async function removeSchedule(id) {
+  if (!confirm('Remove this shift from the schedule?')) return;
+  await apiFetch('/admin/shifts/schedule/' + id, 'DELETE');
+  loadShifts();
+}
+async function setShiftTz(tz) {
+  const res = await apiFetch('/admin/shifts/timezone', 'POST', { tz });
+  if (!res.success) alert(res.msg);
+  loadShifts();
+}
+async function endShift(id, agent) {
+  if (!confirm(`End ${agent}'s shift now? (for when they forgot to clock out)`)) return;
+  const res = await apiFetch(`/admin/shifts/${id}/end`, 'POST', {});
+  if (!res.success) alert(res.msg);
+  loadShifts();
 }
 
 // ── CASHOUTS (recorded by staff after paying) ──
