@@ -328,12 +328,23 @@
     let methods = [], accounts = [];
     let pick = { game: "", method: "" };
 
-    /* --- Game tiles (same games as the home page) --- */
-    $("#pick-game").innerHTML = S.games.map((g) => `
-      <button type="button" class="pick pick--game" role="radio" aria-checked="false" data-game="${esc(g.key)}">
+    /* --- Game tiles (same games as the home page); first 8, the rest behind "Show all" --- */
+    const FIRST = 8;
+    $("#pick-game").innerHTML = S.games.map((g, i) => `
+      <button type="button" class="pick pick--game${i >= FIRST ? " is-extra" : ""}" role="radio" aria-checked="false" data-game="${esc(g.key)}">
         ${g.image ? `<img src="../${esc(g.image)}" alt="" loading="lazy">` : `<span class="pick__art">${esc(g.name.slice(0, 2).toUpperCase())}</span>`}
         <span class="pick__name">${esc(g.name)}</span>
       </button>`).join("");
+    const moreBtn = $("#more-games");
+    const showAllGames = (all) => {
+      $("#pick-game").classList.toggle("show-all", all);
+      moreBtn.textContent = all ? "Show fewer games" : `Show all ${S.games.length} games`;
+    };
+    if (S.games.length > FIRST) {
+      moreBtn.hidden = false;
+      showAllGames(false);
+      moreBtn.addEventListener("click", () => showAllGames(!$("#pick-game").classList.contains("show-all")));
+    }
 
     const select = (groupSel, attr, value) => {
       $$(`${groupSel} [${attr}]`).forEach((b) => b.setAttribute("aria-checked", String(b.getAttribute(attr) === value)));
@@ -373,9 +384,18 @@
       BW.paymentMethods().then((r) => (methods = r.data || [])).catch(() => {}),
       BW.gameAccounts().then((r) => (accounts = r.data || [])).catch(() => {}),
     ]);
+    // Brand colour + symbol for well-known methods; anything else uses the icon set in admin
+    const BRAND = {
+      cashapp: ["#00d64f", "$"], venmo: ["#008cff", "V"], paypal: ["#003087", "P"], zelle: ["#6d1ed4", "Z"],
+      chime: ["#1ec677", "C"], bitcoin: ["#f7931a", "₿"], btc: ["#f7931a", "₿"], usdt: ["#26a17b", "₮"],
+      applepay: ["#000000", ""], apple_pay: ["#000000", ""], googlepay: ["#4285f4", "G"], google_pay: ["#4285f4", "G"],
+    };
     $("#pick-method").innerHTML = methods.length
-      ? methods.map((m) => `<button type="button" class="pick pick--method" role="radio" aria-checked="false" data-method="${esc(m.key)}">
-          <span class="pick__icon">${esc(m.icon || "💳")}</span><span class="pick__name">${esc(m.name)}</span></button>`).join("")
+      ? methods.map((m) => {
+          const [bg, sym] = BRAND[String(m.key).toLowerCase()] || ["var(--surface-2)", m.icon || "💳"];
+          return `<button type="button" class="pick pick--method" role="radio" aria-checked="false" data-method="${esc(m.key)}">
+            <span class="pick__icon" style="background:${bg}">${esc(sym)}</span><span class="pick__name">${esc(m.name)}</span></button>`;
+        }).join("")
       : '<p class="empty">No payment methods yet — message support in Chats.</p>';
     if (methods.length === 1) { pick.method = methods[0].key; select("#pick-method", "data-method", pick.method); }
     loadHistory();
@@ -383,7 +403,10 @@
 
     // Opened from a game tile elsewhere (?game=juwa) → preselect it
     const pre = new URLSearchParams(location.search).get("game");
-    if (pre && S.games.some((g) => g.key === pre)) { pick.game = pre; select("#pick-game", "data-game", pre); }
+    if (pre && S.games.some((g) => g.key === pre)) {
+      pick.game = pre; select("#pick-game", "data-game", pre);
+      if (S.games.findIndex((g) => g.key === pre) >= FIRST) showAllGames(true);
+    }
 
     /* --- Step 4: show how to pay --- */
     const showStep = (which) => {
@@ -415,6 +438,45 @@
       showStep("pay");
     });
     $("#pay-back").addEventListener("click", () => showStep("form"));
+
+    /* --- Load / Cash out tabs --- */
+    const coForm = $("#f-cashout");
+    $$("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+      $$("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      const cash = b.dataset.mode === "cashout";
+      coForm.hidden = !cash;
+      form.hidden = cash; box.hidden = true; done.hidden = true;
+    }));
+
+    /* --- Cash out → a message to support (handled by hand, alert also goes to Telegram) --- */
+    const myGames = S.games.filter((g) => accounts.some((a) => a.game === g.key));
+    $("#co-game").innerHTML = '<option value="">Select a game</option>' +
+      (myGames.length ? myGames : S.games).map((g) => `<option value="${esc(g.key)}">${esc(g.name)}</option>`).join("");
+    $("#co-method").innerHTML = '<option value="">Select a method</option>' +
+      (methods.length ? methods.map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
+                      : (S.paymentMethods || []).map((m) => `<option>${esc(m)}</option>`)).join("");
+    coForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const game = $("#co-game").value, amount = parseFloat($("#co-amount").value);
+      const method = $("#co-method").value, address = $("#co-address").value.trim();
+      if (!game) return toast("Please choose a game.");
+      if (!amount || amount <= 0) return toast("Enter an amount.");
+      if (!method) return toast("Choose how you want to receive it.");
+      if (!address) return toast("Enter where we should send it.");
+      const acc = accounts.find((a) => a.game === game);
+      const text = `💸 Cashout request\nGame: ${gameInfo(game).name}${acc ? ` (${acc.game_username})` : ""}\n` +
+                   `Amount: ${money(amount)}\nSend to: ${method} — ${address}`;
+      await busyBtn($("button[type=submit]", coForm), "Sending…", async () => {
+        try {
+          const agents = (await BW.supportAgents()).data || [];
+          await BW.sendSupportMessage((agents[0] && agents[0].name) || "BigWin Support", text);
+          coForm.reset();
+          $("#pay-ok-text").textContent = `Support will cash out ${money(amount)} from ${gameInfo(game).name} and message you in Chats when it's sent.`;
+          coForm.hidden = true;
+          showStep("done");
+        } catch (err) { toast(err.message); }
+      });
+    });
     box.addEventListener("click", async (e) => {
       const c = e.target.closest("[data-copy]");
       if (!c) return;
@@ -440,6 +502,7 @@
     });
     $("#pay-again").addEventListener("click", () => {
       pick.game = ""; select("#pick-game", "data-game", "");
+      $$("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === "load")));
       showStep("form");
     });
   }
